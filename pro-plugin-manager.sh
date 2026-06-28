@@ -1,6 +1,20 @@
 #!/bin/bash
 
 #############################################
+#  Pro Plugin Manager — bobclub.ir
+#############################################
+#  Structure:
+#    - Color palette
+#    - Helpers (webroot, wordpress check, owner, wp-cli)
+#    - Feature functions (one per menu option)
+#    - main()  -> header, webroot, menu, dispatch
+#
+#  To add a new option: write a feature function,
+#  then wire it into the menu + case in main().
+#############################################
+
+
+#############################################
 #  COLOR PALETTE (Professional Terminal UI)
 #############################################
 RED='\033[1;31m'
@@ -11,28 +25,40 @@ CYAN='\033[1;36m'
 MAGENTA='\033[1;35m'
 NC='\033[0m'
 
+# Globals filled in by helpers
+WEBROOT=""
+ControlPanel=""
+OWNER=""
+GROUP=""
+WP_CMD=""
+
+
 #############################################
-#  STEP 1 — Get Domain
+#  HELPERS
 #############################################
 
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${CYAN}           Pro Plugin Manager          ${NC}"
-echo -e "${CYAN}               bobclub.ir              ${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo
+print_header() {
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}           Pro Plugin Manager          ${NC}"
+    echo -e "${CYAN}               bobclub.ir              ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo
+}
 
-read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+# Resolve $WEBROOT from a domain (cPanel / DirectAdmin) or current dir.
+resolve_webroot() {
+    read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
 
-if [ -z "$DOMAIN" ]; then
-    WEBROOT="$(pwd)"
-    echo -e "${GREEN}✔ No domain entered. Using current directory:${NC}"
-    echo -e "${BLUE}Public Webroot:${NC} $WEBROOT"
-else
-    #############################################
-    # Detect cPanel
-    #############################################
+    if [ -z "$DOMAIN" ]; then
+        WEBROOT="$(pwd)"
+        echo -e "${GREEN}✔ No domain entered. Using current directory:${NC}"
+        echo -e "${BLUE}Public Webroot:${NC} $WEBROOT"
+        return 0
+    fi
+
+    # cPanel
     if [ -d "/usr/local/cpanel" ]; then
-    	ControlPanel="Cpanel"
+        ControlPanel="Cpanel"
         echo -e "${MAGENTA}Control Panel Detected: cPanel${NC}"
 
         for USER in /var/cpanel/users/*; do
@@ -54,15 +80,13 @@ else
 
         if [ -z "$WEBROOT" ]; then
             echo -e "${RED}✘ Domain not found in cPanel${NC}"
-            exit 1
+            return 1
         fi
     fi
 
-    #############################################
-    # Detect DirectAdmin
-    #############################################
+    # DirectAdmin
     if [ -d "/usr/local/directadmin" ] && [ -z "$WEBROOT" ]; then
-    	ControlPanel="DirectAdmin"
+        ControlPanel="DirectAdmin"
         echo -e "${MAGENTA}Control Panel Detected: DirectAdmin${NC}"
 
         for USER in /usr/local/directadmin/data/users/*; do
@@ -83,255 +107,216 @@ else
 
         if [ -z "$WEBROOT" ]; then
             echo -e "${RED}✘ Domain not found in DirectAdmin${NC}"
-            exit 1
+            return 1
         fi
     fi
-fi
 
-#############################################
-#  Change directory
-#############################################
+    return 0
+}
 
-echo -e "${BLUE}Using Webroot:${NC} $WEBROOT"
-cd "$WEBROOT" || { echo -e "${RED}Cannot access webroot!${NC}"; exit 1; }
+# cd into webroot and confirm it's a WordPress install.
+require_wordpress() {
+    echo -e "${BLUE}Using Webroot:${NC} $WEBROOT"
+    cd "$WEBROOT" || { echo -e "${RED}Cannot access webroot!${NC}"; return 1; }
 
-
-#############################################
-#  STEP 2 — Menu
-#############################################
-
-echo
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${CYAN}      Select WP Plugin Operation       ${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo
-echo -e "${YELLOW}1) Woocomerce Manager (Soon)${NC}"
-echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
-echo -e "${YELLOW}3) Search And Replace (Soon)${NC}"
-echo -e "${YELLOW}4) Install latest Blue Gaurd${NC}"
-echo
-
-read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
-
-case $choice in
-    1) echo -e "${MAGENTA}Invalid choice!${NC}"; exit 1 ;;
-    2) echo -e "${MAGENTA}Invalid choice!${NC}"; exit 1 ;;
-    3) echo -e "${MAGENTA}Invalid choice!${NC}"; exit 1 ;;
-    4) action="bluegaurd" ;;
-    *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
-esac
-
-
-#############################################
-#  STEP 3 — Validate WP installation
-#############################################
-if [[ ! -f "wp-config.php" ]]; then
-    echo -e "${RED}✘ Error: WordPress not found in this directory.${NC}"
-    exit 1
-fi
-
-
-#############################################
-#  STEP 4 — Detect Owner
-#############################################
-OWNER=""
-GROUP=""
-
-if command -v stat >/dev/null 2>&1; then
-    OWNER=$(stat -c '%U' wp-config.php 2>/dev/null || stat -f '%Su' wp-config.php 2>/dev/null)
-    GROUP=$(stat -c '%G' wp-config.php 2>/dev/null || stat -f '%Sg' wp-config.php 2>/dev/null)
-fi
-
-
-#############################################
-#  STEP 6 — Download & Install
-#############################################
-
-echo -e "${BLUE}↓ Downloading Blue Gaurd...${NC}"
-wget -O blue-guard.zip "http://guard.iswps.ir/blue-guard/Blue-guard.zip" || { echo -e "${RED}Download failed!${NC}"; exit 1; }
-
-echo -e "${BLUE}Extracting...${NC}"
-unzip -q blue-guard.zip
-
-if [[ ! -d "blue-guard" ]]; then
-    echo -e "${RED}✘ Extraction failed!${NC}"
-    exit 1
-fi
-
-
-#############################################
-#  MOVE OLD CORE INSTEAD OF REMOVING
-#############################################
-
-echo -e "${BLUE}Creating Old Blue Guard directory...${NC}"
-mkdir -p old-blue-guard
-
-echo -e "${BLUE}Moving old Blue Guard core files into old-core...${NC}"
-
-mv wp-content/plugins/blue-guard old-blue-guard/ 2>/dev/null
-chmod -R 600 old-blue-guard/
-
-#############################################
-# Copy new core
-#############################################
-
-echo -e "${BLUE}Copying New blue Guard core...${NC}"
-cp -R blue-guard wp-content/plugins
-
-
-echo -e "${BLUE}Cleaning temporary files...${NC}"
-rm -rf blue-guard blue-guard.zip
-
-
-#############################################
-#  STEP 7 — Fix permissions
-#############################################
-
-echo -e "${MAGENTA}Applying permissions...${NC}"
-find wp-content/plugins \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
-
-if [[ -n "$OWNER" ]]; then
-    chown -R "$OWNER:$GROUP" wp-content/plugins/blue-guard 2>/dev/null
-fi
-
-
-#############################################
-#  STEP 8 — Activate Plugin
-#############################################
-
-echo -e "${MAGENTA}Activating Plugin...${NC}"
-activated=false
-WP_CMD=""
-
-# Temporary vars for portable wp
-TMPDIR=""
-ZIP=""
-WPCLI=""
-
-# 1) Try system wp if available
-if command -v wp >/dev/null 2>&1; then
-    WP_PATH=$(command -v wp)
-    WP_CMD="$WP_PATH --allow-root"
-    if $WP_CMD plugin activate blue-guard >/dev/null 2>&1; then
-        echo -e "${GREEN}✔ Plugin activated via system wp${NC}"
-        activated=true
-    else
-        echo -e "${YELLOW}⚠ system wp found but activation failed, trying other methods...${NC}"
-        WP_CMD=""
+    if [[ ! -f "wp-config.php" ]]; then
+        echo -e "${RED}✘ Error: WordPress not found in this directory.${NC}"
+        return 1
     fi
-fi
+    return 0
+}
 
-# 2) Try portable wp binary (download) - use /tmp (do not create a temp dir)
-if [[ "$activated" != true ]]; then
+# Read owner/group of wp-config.php into $OWNER / $GROUP.
+detect_owner() {
+    OWNER=""
+    GROUP=""
+    if command -v stat >/dev/null 2>&1; then
+        OWNER=$(stat -c '%U' wp-config.php 2>/dev/null || stat -f '%Su' wp-config.php 2>/dev/null)
+        GROUP=$(stat -c '%G' wp-config.php 2>/dev/null || stat -f '%Sg' wp-config.php 2>/dev/null)
+    fi
+}
+
+# Find a usable wp-cli command for the current webroot and store it in $WP_CMD.
+# Returns 0 if found, 1 otherwise.
+resolve_wp_cli() {
+    WP_CMD=""
+
+    # 1) System wp
+    if command -v wp >/dev/null 2>&1; then
+        local cmd="$(command -v wp) --allow-root"
+        if $cmd core version >/dev/null 2>&1; then
+            WP_CMD="$cmd"
+            echo -e "${GREEN}✔ Using system wp${NC}"
+            return 0
+        fi
+    fi
+
+    # 2) Portable wp binary (downloaded to /tmp)
     echo -e "${MAGENTA}Downloading portable wp binary to /tmp...${NC}"
-    TMPDIR=""   # leave empty so later cleanup won't remove /tmp
-    ZIP="/tmp/wp.zip"
-    WPCLI="/tmp/wp"
+    local zip="/tmp/wp.zip"
+    local wpcli="/tmp/wp"
+    rm -f "$zip" "$wpcli" 2>/dev/null
 
-    rm -f "$ZIP" "$WPCLI" 2>/dev/null
-
-    if wget -q -O "$ZIP" "http://dl.iswps.ir/cli/wp.zip"; then
-        # try to extract the wp executable into /tmp (junk paths)
-        if unzip -j -o "$ZIP" 'wp' -d /tmp >/dev/null 2>&1 || unzip -j -o "$ZIP" '*wp' -d /tmp >/dev/null 2>&1; then
-            if [[ -f "$WPCLI" ]]; then
-                chmod +x "$WPCLI"
-                WP_CMD="$WPCLI --allow-root"
-                if $WP_CMD plugin activate blue-guard >/dev/null 2>&1; then
-                    echo -e "${GREEN}✔ Plugin activated via portable wp${NC}"
-                    activated=true
-                else
-                    echo -e "${YELLOW}⚠ Portable wp found but activation failed${NC}"
-                    WP_CMD=""
-                    rm -f "$ZIP" "$WPCLI" 2>/dev/null
+    if wget -q -O "$zip" "http://dl.iswps.ir/cli/wp.zip"; then
+        if unzip -j -o "$zip" 'wp' -d /tmp >/dev/null 2>&1 || unzip -j -o "$zip" '*wp' -d /tmp >/dev/null 2>&1; then
+            if [[ -f "$wpcli" ]]; then
+                chmod +x "$wpcli"
+                local cmd="$wpcli --allow-root"
+                if $cmd core version >/dev/null 2>&1; then
+                    WP_CMD="$cmd"
+                    echo -e "${GREEN}✔ Using portable wp${NC}"
+                    return 0
                 fi
-            else
-                echo -e "${YELLOW}⚠ wp binary not found inside zip${NC}"
-                rm -f "$ZIP" 2>/dev/null
             fi
-        else
-            echo -e "${YELLOW}⚠ Failed to extract wp from zip${NC}"
-            rm -f "$ZIP" 2>/dev/null
         fi
-    else
-        echo -e "${YELLOW}⚠ Failed to download portable wp${NC}"
     fi
-fi
+    rm -f "$zip" 2>/dev/null
 
-# 3) Fallback to control-panel specific wp-cli paths
-if [[ "$activated" != true ]]; then
+    # 3) Control-panel specific paths
     if [[ "$ControlPanel" = "DirectAdmin" ]]; then
-        echo -e "${MAGENTA}Trying DirectAdmin wp-cli phar...${NC}"
-        DA_PHAR="/usr/local/directadmin/custombuild/cache/wp-cli-2.12.0.phar"
-        if [[ -x "/usr/local/php81/bin/php" && -f "$DA_PHAR" ]]; then
-            WP_CMD="/usr/local/php81/bin/php $DA_PHAR"
-            if $WP_CMD plugin activate blue-guard --allow-root >/dev/null 2>&1; then
-                echo -e "${GREEN}✔ Plugin activated via DirectAdmin wp-cli phar${NC}"
-                activated=true
-            else
-                echo -e "${YELLOW}⚠ DirectAdmin wp-cli phar activation failed${NC}"
-                WP_CMD=""
+        local da_phar="/usr/local/directadmin/custombuild/cache/wp-cli-2.12.0.phar"
+        if [[ -x "/usr/local/php81/bin/php" && -f "$da_phar" ]]; then
+            local cmd="/usr/local/php81/bin/php $da_phar --allow-root"
+            if $cmd core version >/dev/null 2>&1; then
+                WP_CMD="$cmd"
+                echo -e "${GREEN}✔ Using DirectAdmin wp-cli phar${NC}"
+                return 0
             fi
-        else
-            echo -e "${YELLOW}⚠ DirectAdmin wp-cli phar not available${NC}"
         fi
     fi
 
-    if [[ "$activated" != true && "$ControlPanel" = "Cpanel" ]]; then
-        echo -e "${MAGENTA}Trying cPanel wp binary...${NC}"
-        CP_WP="/usr/local/bin/wp"
-        if [[ -x "$CP_WP" ]]; then
-            WP_CMD="$CP_WP --allow-root"
-            if $WP_CMD plugin activate blue-guard >/dev/null 2>&1; then
-                echo -e "${GREEN}✔ Plugin activated via cPanel wp binary${NC}"
-                activated=true
-            else
-                echo -e "${YELLOW}⚠ cPanel wp binary activation failed${NC}"
-                WP_CMD=""
+    if [[ "$ControlPanel" = "Cpanel" ]]; then
+        local cp_wp="/usr/local/bin/wp"
+        if [[ -x "$cp_wp" ]]; then
+            local cmd="$cp_wp --allow-root"
+            if $cmd core version >/dev/null 2>&1; then
+                WP_CMD="$cmd"
+                echo -e "${GREEN}✔ Using cPanel wp binary${NC}"
+                return 0
             fi
-        else
-            echo -e "${YELLOW}⚠ cPanel wp binary not available${NC}"
         fi
     fi
-fi
 
-if [[ "$activated" != true ]]; then
-    echo -e "${YELLOW}✘ Plugin activation could not be confirmed. You may need to activate it manually from WP-Admin or via wp-cli.${NC}"
-fi
+    echo -e "${YELLOW}⚠ No usable wp-cli found.${NC}"
+    return 1
+}
+
 
 #############################################
-#  STEP 9 — Verify plugin status
+#  FEATURE: Install latest Blue Guard
 #############################################
+install_blue_guard() {
+    require_wordpress || return 1
+    detect_owner
 
-echo -e "${MAGENTA}Checking plugin status...${NC}"
+    # Download & extract
+    echo -e "${BLUE}↓ Downloading Blue Guard...${NC}"
+    wget -O blue-guard.zip "http://guard.iswps.ir/blue-guard/Blue-guard.zip" \
+        || { echo -e "${RED}Download failed!${NC}"; return 1; }
 
-if [[ -n "$WP_CMD" ]]; then
-    # Check if plugin is active
-    if $WP_CMD plugin is-active blue-guard --allow-root >/dev/null 2>&1; then
-        echo -e "${GREEN}✔ blue-guard is ACTIVE${NC}"
-        # Show detailed status
+    echo -e "${BLUE}Extracting...${NC}"
+    unzip -q blue-guard.zip
+
+    if [[ ! -d "blue-guard" ]]; then
+        echo -e "${RED}✘ Extraction failed!${NC}"
+        return 1
+    fi
+
+    # Keep old core instead of removing it
+    echo -e "${BLUE}Backing up old Blue Guard core into old-blue-guard/...${NC}"
+    mkdir -p old-blue-guard
+    mv wp-content/plugins/blue-guard old-blue-guard/ 2>/dev/null
+    chmod -R 600 old-blue-guard/
+
+    # Copy new core
+    echo -e "${BLUE}Copying new Blue Guard core...${NC}"
+    cp -R blue-guard wp-content/plugins
+
+    echo -e "${BLUE}Cleaning temporary files...${NC}"
+    rm -rf blue-guard blue-guard.zip
+
+    # Fix permissions
+    echo -e "${MAGENTA}Applying permissions...${NC}"
+    find wp-content/plugins \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
+    if [[ -n "$OWNER" ]]; then
+        chown -R "$OWNER:$GROUP" wp-content/plugins/blue-guard 2>/dev/null
+    fi
+
+    # Activate
+    echo -e "${MAGENTA}Activating plugin...${NC}"
+    if resolve_wp_cli; then
+        if $WP_CMD plugin activate blue-guard >/dev/null 2>&1; then
+            echo -e "${GREEN}✔ Plugin activated${NC}"
+        else
+            echo -e "${YELLOW}✘ Activation failed — activate manually from WP-Admin.${NC}"
+        fi
+
+        # Verify
+        echo -e "${MAGENTA}Checking plugin status...${NC}"
+        if $WP_CMD plugin is-active blue-guard >/dev/null 2>&1; then
+            echo -e "${GREEN}✔ blue-guard is ACTIVE${NC}"
+        else
+            echo -e "${YELLOW}✘ blue-guard is NOT active${NC}"
+        fi
         echo
-        $WP_CMD plugin status blue-guard --allow-root 2>/dev/null || true
+        $WP_CMD plugin status blue-guard 2>/dev/null || true
     else
-        echo -e "${YELLOW}✘ blue-guard is NOT active${NC}"
-        echo
-        $WP_CMD plugin status blue-guard --allow-root 2>/dev/null || true
+        echo -e "${YELLOW}⚠ No wp-cli available. Please activate blue-guard from WP-Admin.${NC}"
     fi
-else
-    echo -e "${YELLOW}⚠ No wp-cli available to check status. Please verify in WP-Admin or install wp-cli.${NC}"
-fi
 
-# Cleanup portable wp if it was downloaded and not needed anymore
-if [[ -n "$TMPDIR" && -d "$TMPDIR" ]]; then
-    rm -f "$ZIP" "$WPCLI" 2>/dev/null
-    rm -rf "$TMPDIR"
-fi
+    echo
+    echo -e "${GREEN}✔ Blue Guard installed/updated/repaired successfully!${NC}"
+    echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
+    echo
+}
 
 
 #############################################
-#  DONE
+#  FEATURE STUBS (develop these gradually)
 #############################################
+manage_woocommerce() {
+    echo -e "${YELLOW}WooCommerce Manager is not implemented yet. Coming soon.${NC}"
+}
 
-echo
-echo -e "${GREEN}✔ Blue Guard installed/updated/repaired successfully!${NC}"
-echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
-echo
+manage_elementor() {
+    echo -e "${YELLOW}Elementor Manager is not implemented yet. Coming soon.${NC}"
+}
+
+search_and_replace() {
+    echo -e "${YELLOW}Search And Replace is not implemented yet. Coming soon.${NC}"
+}
+
+
+#############################################
+#  MENU + DISPATCH
+#############################################
+show_menu() {
+    echo
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}      Select WP Plugin Operation       ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo
+    echo -e "${YELLOW}1) WooCommerce Manager (Soon)${NC}"
+    echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
+    echo -e "${YELLOW}3) Search And Replace (Soon)${NC}"
+    echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
+    echo
+}
+
+main() {
+    print_header
+    resolve_webroot || exit 1
+    show_menu
+
+    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
+
+    case $choice in
+        1) manage_woocommerce ;;
+        2) manage_elementor ;;
+        3) search_and_replace ;;
+        4) install_blue_guard ;;
+        *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
+    esac
+}
+
+main "$@"
