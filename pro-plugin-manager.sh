@@ -1,17 +1,12 @@
 #!/bin/bash
-
-#############################################
-#  Pro Plugin Manager — bobclub.ir
-#############################################
-#  Structure:
-#    - Color palette
-#    - Helpers (webroot, wordpress check, owner, wp-cli)
-#    - Feature functions (one per menu option)
-#    - main()  -> header, webroot, menu, dispatch
-#
-#  To add a new option: write a feature function,
-#  then wire it into the menu + case in main().
-#############################################
+# ════════════════════════════════════════════════════════════
+#   bobclub.ir  ·  Pro Plugin Manager
+#   Menu-driven WordPress plugin operations.
+# ────────────────────────────────────────────────────────────
+#   Website   : https://bobclub.ir
+#   Scripts   : https://bobclub.ir/pool
+#   Telegram  : https://t.me/bob_club
+# ════════════════════════════════════════════════════════════
 
 
 #############################################

@@ -1,5 +1,12 @@
 #!/bin/bash
-# fix_roundcube (Colorized Version)
+# ════════════════════════════════════════════════════════════
+#   bobclub.ir  ·  Fix Roundcube
+#   Repair and reconfigure Roundcube webmail.
+# ────────────────────────────────────────────────────────────
+#   Website   : https://bobclub.ir
+#   Scripts   : https://bobclub.ir/pool
+#   Telegram  : https://t.me/bob_club
+# ════════════════════════════════════════════════════════════
 set -e
 
 # ======== COLORS ========

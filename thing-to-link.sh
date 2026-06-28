@@ -1,4 +1,12 @@
 #!/bin/bash
+# ════════════════════════════════════════════════════════════
+#   bobclub.ir  ·  Thing To Link
+#   Fetch a file or URL into the web root and make it accessible.
+# ────────────────────────────────────────────────────────────
+#   Website   : https://bobclub.ir
+#   Scripts   : https://bobclub.ir/pool
+#   Telegram  : https://t.me/bob_club
+# ════════════════════════════════════════════════════════════
 set +H
 
 WEBROOT="/var/www/html"

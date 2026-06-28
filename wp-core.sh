@@ -1,4 +1,12 @@
 #!/bin/bash
+# ════════════════════════════════════════════════════════════
+#   bobclub.ir  ·  WP Core Manager
+#   Repair, update or install WordPress core.
+# ────────────────────────────────────────────────────────────
+#   Website   : https://bobclub.ir
+#   Scripts   : https://bobclub.ir/pool
+#   Telegram  : https://t.me/bob_club
+# ════════════════════════════════════════════════════════════
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
