@@ -41,10 +41,19 @@ DB_PREFIX=""
 #############################################
 
 print_header() {
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}           Pro Plugin Manager          ${NC}"
-    echo -e "${CYAN}               bobclub.ir              ${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
+    local hr sr
+    hr=$(printf '━%.0s' {1..48})
+    sr=$(printf '─%.0s' {1..48})
+    echo
+    echo -e "${C}${hr}${N}"
+    echo -e "  ${Y}${B}bobclub.ir${N}  ·  ${B}Pro Plugin Manager${N}"
+    echo -e "  Menu-driven WordPress plugin operations."
+    echo -e "${C}${sr}${N}"
+    echo -e "  Website   : https://bobclub.ir"
+    echo -e "  Pool      : https://bobclub.ir/pool"
+    echo -e "  Telegram  : https://t.me/bob_club"
+    echo -e "${C}${hr}${N}"
     echo
 }
 

@@ -29,14 +29,23 @@ success(){ echo -e "${GREEN}[OK]${RESET} $*"; log "[OK] $*"; }
 error(){ echo -e "${RED}[ERROR]${RESET} $*"; log "[ERROR] $*"; }
 testmsg(){ echo -e "${BLUE}[TEST]${RESET} $*"; log "[TEST] $*"; }
 
-banner(){
-echo -e "${CYAN}
-===========================================
-     WP Plugin Hunter � Optimized Edition
-===========================================
-${RESET}"
+print_header() {
+    local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
+    local hr sr
+    hr=$(printf '━%.0s' {1..48})
+    sr=$(printf '─%.0s' {1..48})
+    echo
+    echo -e "${C}${hr}${N}"
+    echo -e "  ${Y}${B}bobclub.ir${N}  ·  ${B}Plugin Hunter${N}"
+    echo -e "  Scan a WordPress install for plugins and log results."
+    echo -e "${C}${sr}${N}"
+    echo -e "  Website   : https://bobclub.ir"
+    echo -e "  Pool      : https://bobclub.ir/pool"
+    echo -e "  Telegram  : https://t.me/bob_club"
+    echo -e "${C}${hr}${N}"
+    echo
 }
-banner
+print_header
 
 # ---------- WP Path ----------
 if [ -n "$1" ]; then
