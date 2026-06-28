@@ -32,6 +32,14 @@ OWNER=""
 GROUP=""
 WP_CMD=""
 
+# DB credentials (filled by parse_wp_config)
+DB_NAME=""
+DB_USER=""
+DB_PASSWORD=""
+DB_HOST=""
+DB_PORT=""
+DB_PREFIX=""
+
 
 #############################################
 #  HELPERS
@@ -136,6 +144,41 @@ detect_owner() {
     fi
 }
 
+# Parse DB credentials from wp-config.php into the DB_* globals.
+parse_wp_config() {
+    local cfg="wp-config.php"
+    [[ -f "$cfg" ]] || { echo -e "${RED}✘ wp-config.php not found.${NC}"; return 1; }
+
+    # Read a define('KEY', 'value') from wp-config (first match, single/double quotes).
+    _wpc_define() {
+        grep -E "define\(\s*['\"]$1['\"]" "$cfg" \
+            | head -n1 \
+            | sed -E "s/.*define\(\s*['\"]$1['\"]\s*,\s*['\"]([^'\"]*)['\"].*/\1/"
+    }
+
+    DB_NAME=$(_wpc_define DB_NAME)
+    DB_USER=$(_wpc_define DB_USER)
+    DB_PASSWORD=$(_wpc_define DB_PASSWORD)
+    DB_HOST=$(_wpc_define DB_HOST)
+    DB_PREFIX=$(grep -E '^\s*\$table_prefix' "$cfg" | head -n1 | sed -E "s/.*=\s*['\"]([^'\"]*)['\"].*/\1/")
+
+    [[ -z "$DB_HOST" ]] && DB_HOST="localhost"
+    [[ -z "$DB_PREFIX" ]] && DB_PREFIX="wp_"
+
+    # Split host:port if present
+    DB_PORT=""
+    if [[ "$DB_HOST" == *:* ]]; then
+        DB_PORT="${DB_HOST##*:}"
+        DB_HOST="${DB_HOST%%:*}"
+    fi
+
+    if [[ -z "$DB_NAME" || -z "$DB_USER" ]]; then
+        echo -e "${RED}✘ Could not parse DB credentials from wp-config.php${NC}"
+        return 1
+    fi
+    return 0
+}
+
 # Find a usable wp-cli command for the current webroot and store it in $WP_CMD.
 # Returns 0 if found, 1 otherwise.
 resolve_wp_cli() {
@@ -227,6 +270,7 @@ install_blue_guard() {
     mkdir -p old-blue-guard
     mv wp-content/plugins/blue-guard old-blue-guard/ 2>/dev/null
     chmod -R 600 old-blue-guard/
+    chown -R "$OWNER:$GROUP" old-blue-guard/ 2>/dev/null
 
     # Copy new core
     echo -e "${BLUE}Copying new Blue Guard core...${NC}"
@@ -282,8 +326,154 @@ manage_elementor() {
     echo -e "${YELLOW}Elementor Manager is not implemented yet. Coming soon.${NC}"
 }
 
+#############################################
+#  FEATURE: Search And Replace (whole DB)
+#############################################
+
+# Escape a value for safe use inside a single-quoted MySQL string literal.
+sql_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"    # backslash -> double backslash
+    s="${s//\'/\\\'}"    # ' -> \'
+    printf '%s' "$s"
+}
+
+# Direct MySQL fallback across every text column of every table, using the
+# DB_* globals and the OLD/NEW values, with per-table progress.
+#   $1 = mode:  "count" (dry run, no changes)  |  "apply" (perform replace)
+db_search_replace() {
+    local mode="$1"
+    local deffile
+    deffile=$(mktemp /tmp/wpdb.XXXXXX) || { echo -e "${RED}✘ mktemp failed${NC}"; return 1; }
+    chmod 600 "$deffile"
+    {
+        echo "[client]"
+        echo "user=$DB_USER"
+        echo "password=$DB_PASSWORD"
+        echo "host=$DB_HOST"
+        [[ -n "$DB_PORT" ]] && echo "port=$DB_PORT"
+    } > "$deffile"
+
+    local MYSQL="mysql --defaults-extra-file=$deffile"
+
+    if ! $MYSQL -e "USE \`$DB_NAME\`;" >/dev/null 2>&1; then
+        echo -e "${RED}✘ Cannot connect to database '$DB_NAME'.${NC}"
+        rm -f "$deffile"
+        return 1
+    fi
+
+    local OLD_ESC NEW_ESC
+    OLD_ESC=$(sql_escape "$OLD")
+    NEW_ESC=$(sql_escape "$NEW")
+
+    local tables total i grand
+    tables=$($MYSQL -N -e "SHOW TABLES" "$DB_NAME")
+    total=$(echo "$tables" | grep -c .)
+    i=0
+    grand=0
+
+    echo -e "${BLUE}Scanning $total tables...${NC}"
+    echo
+
+    while IFS= read -r table; do
+        [[ -z "$table" ]] && continue
+        i=$((i + 1))
+
+        local cols changed
+        cols=$($MYSQL -N -e "SELECT COLUMN_NAME FROM information_schema.COLUMNS \
+            WHERE TABLE_SCHEMA='$DB_NAME' AND TABLE_NAME='$table' \
+            AND DATA_TYPE IN ('char','varchar','text','tinytext','mediumtext','longtext')")
+        changed=0
+
+        while IFS= read -r col; do
+            [[ -z "$col" ]] && continue
+            local n
+            if [[ "$mode" = "count" ]]; then
+                # Count rows that contain OLD (exact substring, no wildcards).
+                n=$($MYSQL "$DB_NAME" -N -e \
+                    "SELECT COUNT(*) FROM \`$table\` WHERE INSTR(\`$col\`, '$OLD_ESC') > 0;" \
+                    2>/dev/null | tail -n1)
+            else
+                n=$($MYSQL "$DB_NAME" -N -e \
+                    "UPDATE \`$table\` SET \`$col\`=REPLACE(\`$col\`,'$OLD_ESC','$NEW_ESC'); SELECT ROW_COUNT();" \
+                    2>/dev/null | tail -n1)
+            fi
+            [[ "$n" =~ ^[0-9]+$ ]] || n=0
+            changed=$((changed + n))
+        done <<< "$cols"
+
+        grand=$((grand + changed))
+        if [[ "$mode" = "count" ]]; then
+            printf "${CYAN}[%d/%d]${NC} %-45s ${YELLOW}%d match(es)${NC}\n" "$i" "$total" "$table" "$changed"
+        else
+            printf "${CYAN}[%d/%d]${NC} %-45s ${GREEN}%d replaced${NC}\n" "$i" "$total" "$table" "$changed"
+        fi
+    done <<< "$tables"
+
+    rm -f "$deffile"
+    echo
+    if [[ "$mode" = "count" ]]; then
+        echo -e "${YELLOW}► Dry run: $grand row(s) contain the value across $total tables. Nothing changed.${NC}"
+    else
+        echo -e "${GREEN}✔ Done. $grand value(s) replaced across $total tables.${NC}"
+    fi
+}
+
 search_and_replace() {
-    echo -e "${YELLOW}Search And Replace is not implemented yet. Coming soon.${NC}"
+    require_wordpress || return 1
+    parse_wp_config || return 1
+
+    echo -e "${BLUE}Target database:${NC} $DB_NAME ${BLUE}on${NC} $DB_HOST${DB_PORT:+:$DB_PORT}"
+    echo
+
+    read -p "$(echo -e ${YELLOW}'Search for (old value): '${NC})" OLD
+    read -p "$(echo -e ${YELLOW}'Replace with (new value): '${NC})" NEW
+
+    if [[ -z "$OLD" ]]; then
+        echo -e "${RED}✘ Search value cannot be empty.${NC}"
+        return 1
+    fi
+
+    echo
+    echo -e "${MAGENTA}Operation${NC}"
+    echo -e "  ${RED}$OLD${NC}  →  ${GREEN}$NEW${NC}"
+    echo -e "${YELLOW}across the entire '$DB_NAME' database.${NC}"
+    echo
+
+    # Mode selection (no CLI switches — menu driven).
+    echo -e "${CYAN}Select mode:${NC}"
+    echo -e "${YELLOW}1) Dry run (count matches only, no changes)${NC}"
+    echo -e "${YELLOW}2) Replace now${NC}"
+    echo
+    read -p "$(echo -e ${GREEN}"Enter choice [1-2]: "${NC})" mode_choice
+
+    local mode
+    case "$mode_choice" in
+        1) mode="count" ;;
+        2) mode="apply" ;;
+        *) echo -e "${RED}Invalid choice!${NC}"; return 1 ;;
+    esac
+    echo
+
+    # Prefer wp-cli: it fixes serialized-data lengths and shows progress.
+    if resolve_wp_cli; then
+        echo -e "${BLUE}Using wp-cli (serialized-safe)...${NC}"
+        echo
+        if [[ "$mode" = "count" ]]; then
+            $WP_CMD search-replace "$OLD" "$NEW" --all-tables --precise --dry-run --report
+        else
+            $WP_CMD search-replace "$OLD" "$NEW" --all-tables --precise --report --verbose
+        fi
+        echo
+        echo -e "${GREEN}✔ Done.${NC}"
+        return 0
+    fi
+
+    # Fallback: direct MySQL using credentials from wp-config.
+    echo -e "${YELLOW}⚠ wp-cli not available — using direct MySQL.${NC}"
+    echo -e "${YELLOW}⚠ Note: in this mode serialized values (arrays/objects) are NOT length-fixed.${NC}"
+    echo
+    db_search_replace "$mode"
 }
 
 
@@ -298,7 +488,7 @@ show_menu() {
     echo
     echo -e "${YELLOW}1) WooCommerce Manager (Soon)${NC}"
     echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
-    echo -e "${YELLOW}3) Search And Replace (Soon)${NC}"
+    echo -e "${YELLOW}3) Search And Replace${NC}"
     echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
     echo
 }
