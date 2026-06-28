@@ -459,23 +459,8 @@ search_and_replace() {
     esac
     echo
 
-    # Prefer wp-cli: it fixes serialized-data lengths and shows progress.
-    if resolve_wp_cli; then
-        echo -e "${BLUE}Using wp-cli (serialized-safe)...${NC}"
-        echo
-        if [[ "$mode" = "count" ]]; then
-            $WP_CMD search-replace "$OLD" "$NEW" --all-tables --precise --dry-run --report
-        else
-            $WP_CMD search-replace "$OLD" "$NEW" --all-tables --precise --report --verbose
-        fi
-        echo
-        echo -e "${GREEN}✔ Done.${NC}"
-        return 0
-    fi
-
-    # Fallback: direct MySQL using credentials from wp-config.
-    echo -e "${YELLOW}⚠ wp-cli not available — using direct MySQL.${NC}"
-    echo -e "${YELLOW}⚠ Note: in this mode serialized values (arrays/objects) are NOT length-fixed.${NC}"
+    # Direct MySQL using credentials from wp-config.
+    echo -e "${YELLOW}⚠ Note: serialized values (arrays/objects) are NOT length-fixed.${NC}"
     echo
     db_search_replace "$mode"
 }
