@@ -97,15 +97,27 @@ if [ ${#PLUGS[@]} -eq 0 ]; then
     exit 1
 fi
 
-# ---------- Cleanup on Interrupt ----------
-CURRENT=""
-cleanup(){
-    if [ -n "$CURRENT" ] && [ -d "$CURRENT.off" ]; then
-        mv "$CURRENT.off" "$CURRENT"
-        info "Restored: $(basename "$CURRENT")"
-    fi
+# ---------- Restore / Cancel ----------
+restore_all(){
+    shopt -s nullglob
+    for OFF in "$PLUGINS"/*.off; do
+        [ -d "$OFF" ] || continue
+        ORIG="${OFF%.off}"
+        mv "$OFF" "$ORIG" && info "Restored: $(basename "$ORIG")"
+    done
+    shopt -u nullglob
 }
-trap cleanup INT TERM
+
+cancel_scan(){
+    echo
+    info "Cancelling scan — restoring all plugins to their original state..."
+    restore_all
+    success "All plugins restored. Scan cancelled."
+    exit 0
+}
+
+# On Ctrl+C / TERM, leave the site exactly as we found it.
+trap cancel_scan INT TERM
 
 # ---------- Domain ----------
 read -r -p "Enter domain (without https://): " DOMAIN
@@ -120,7 +132,8 @@ check_wp_api() {
 
 # ---------- Confirm Problematic Plugin ----------
 confirm_problem() {
-    read -r -p "Plugin \"$1\" seems to fix the issue. Mark it as problematic and keep it disabled? [y/N]: " CHOICE
+    read -r -p "Plugin \"$1\" seems to fix the issue. Mark it as problematic and keep it disabled? [y/N, c=cancel]: " CHOICE
+    [[ "$CHOICE" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$CHOICE" =~ ^[Yy]$ ]] && return 0 || return 1
 }
 
@@ -129,27 +142,28 @@ confirm_problem() {
 #############################################
 
 echo
-info "Phase 1 � Testing plugins individually..."
+info "Phase 1 - Testing plugins individually..."
+info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
 
 for NAME in "${PLUGS[@]}"; do
     [[ "$NAME" == *.off ]] && continue
 
     P="$PLUGINS/$NAME"
-    CURRENT="$P"
 
     mv "$P" "$P.off" || { error "Failed to disable $NAME"; continue; }
     testmsg "Disabled: $NAME"
 
     if [[ "$MODE" == "manual" ]]; then
-        read -r -p "Check your site manually. Is the issue resolved? [y/N]: " MAN
+        read -r -p "Check your site manually. Is the issue resolved? [y/N, c=cancel]: " MAN
+        [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
         if [[ "$MAN" =~ ^[Yy]$ ]]; then
             if confirm_problem "$NAME"; then
                 success "Problematic plugin found: $NAME"
+                info "Left disabled at: $P.off"
                 exit 0
             else
                 mv "$P.off" "$P"
                 info "Restored: $NAME"
-                CURRENT=""
             fi
             continue
         fi
@@ -165,7 +179,6 @@ for NAME in "${PLUGS[@]}"; do
             else
                 mv "$P.off" "$P"
                 info "Restored: $NAME"
-                CURRENT=""
             fi
             continue
         fi
@@ -173,43 +186,60 @@ for NAME in "${PLUGS[@]}"; do
 
     mv "$P.off" "$P"
     info "Restored: $NAME"
-    CURRENT=""
 done
 
 #############################################
 #                PHASE 2                   #
 #############################################
 
-# echo
-# info "Phase 1 did not find a problem. Starting Phase 2..."
+echo
+info "Phase 1 did not find a problem. Starting Phase 2..."
+info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
 
-# # Disable ALL
-# for NAME in "${PLUGS[@]}"; do
-#     [[ "$NAME" == *.off ]] && continue
-#     mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
-# done
-# success "All plugins disabled."
+read -r -p "Proceed with Phase 2 (disable all, enable one-by-one)? [Y/n, c=cancel]: " P2
+[[ "$P2" =~ ^[Cc]$ ]] && cancel_scan
+if [[ "$P2" =~ ^[Nn]$ ]]; then
+    info "Phase 2 skipped by user."
+else
+    # Disable ALL
+    for NAME in "${PLUGS[@]}"; do
+        [[ "$NAME" == *.off ]] && continue
+        mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
+    done
+    success "All plugins disabled."
 
-# # Enable one-by-one
-# for NAME in "${PLUGS[@]}"; do
-#     P="$PLUGINS/$NAME"
+    # Enable one-by-one
+    for NAME in "${PLUGS[@]}"; do
+        P="$PLUGINS/$NAME"
 
-#     if [ -d "$P.off" ]; then
-#         mv "$P.off" "$P"
-#         testmsg "Testing plugin: $NAME"
-#         sleep 2
-#     fi
+        if [ -d "$P.off" ]; then
+            mv "$P.off" "$P"
+            testmsg "Testing plugin: $NAME"
+            sleep 2
+        fi
 
-#     RESULT=$(check_wp_api)
-#     info "API Status: $RESULT"
+        if [[ "$MODE" == "manual" ]]; then
+            read -r -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
+            [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
+            if [[ "$MAN" =~ ^[Yy]$ ]]; then
+                error "$NAME is problematic. Disabling again."
+                mv "$P" "$P.off"
+            else
+                success "$NAME is OK."
+            fi
+        else
+            RESULT=$(check_wp_api)
+            info "API Status: $RESULT"
 
-#     if [[ "$RESULT" == "FAIL" ]]; then
-#         error "$NAME is problematic. Disabling again."
-#         mv "$P" "$P.off"
-#     else
-#         success "$NAME is OK."
-#     fi
-# done
+            if [[ "$RESULT" == "FAIL" ]]; then
+                error "$NAME is problematic. Disabling again."
+                mv "$P" "$P.off"
+            else
+                success "$NAME is OK."
+            fi
+        fi
+    done
+fi
 
 echo
 success "Scan complete."
