@@ -76,6 +76,23 @@ fi
 
 info "Mode selected: $MODE"
 
+# ---------- Strategy Selection ----------
+echo -e "${CYAN}Select search strategy:${RESET}"
+echo "1) linear  (test plugins one-by-one — Phase 1, then Phase 2)"
+echo "2) binary  (bisection — disables half at a time, much faster)"
+read -r -p "Enter choice (1 or 2): " STRATEGY_CHOICE
+
+if [[ "$STRATEGY_CHOICE" == "1" ]]; then
+    STRATEGY="linear"
+elif [[ "$STRATEGY_CHOICE" == "2" ]]; then
+    STRATEGY="binary"
+else
+    error "Invalid strategy selection."
+    exit 1
+fi
+
+info "Strategy selected: $STRATEGY"
+
 # ---------- Validate WP Directories ----------
 if [ ! -d "$PLUGINS" ] && [ ! -d "$PLUGINS_OFF" ]; then
     error "Neither plugins nor plugins.off directory exists."
@@ -136,6 +153,99 @@ confirm_problem() {
     [[ "$CHOICE" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$CHOICE" =~ ^[Yy]$ ]] && return 0 || return 1
 }
+
+# ---------- Resolved Check (sets RESOLVED to yes/no) ----------
+# Manual mode asks the user; automate mode probes the WP REST API.
+ask_resolved() {
+    RESOLVED="no"
+    if [[ "$MODE" == "manual" ]]; then
+        read -r -p "Is the issue resolved now? [y/N, c=cancel]: " ANS
+        [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
+        [[ "$ANS" =~ ^[Yy]$ ]] && RESOLVED="yes"
+    else
+        local RESULT
+        RESULT=$(check_wp_api)
+        info "API Status: $RESULT"
+        [[ "$RESULT" == "OK" ]] && RESOLVED="yes"
+    fi
+}
+
+#############################################
+#             BINARY SEARCH                 #
+#############################################
+# Assumes a single problematic plugin. Each round disables half of the
+# remaining candidates and checks whether the issue is resolved:
+#   - resolved  -> culprit is in the disabled half  (narrow to that half)
+#   - unresolved-> culprit is in the still-active half (narrow to it)
+# Odd counts are fine: the split uses floor(n/2), so a group never empties.
+binary_search() {
+    local -a candidates=()
+    local NAME
+    for NAME in "${PLUGS[@]}"; do
+        [[ "$NAME" == *.off ]] && continue
+        candidates+=("$NAME")
+    done
+
+    echo
+    info "Binary search over ${#candidates[@]} plugin(s)..."
+    info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
+
+    while [ "${#candidates[@]}" -gt 1 ]; do
+        local n=${#candidates[@]}
+        local half=$(( n / 2 ))
+        local -a groupA=("${candidates[@]:0:half}")
+        local -a groupB=("${candidates[@]:half}")
+
+        # Disable group A, keep group B (and everything else) active.
+        for NAME in "${groupA[@]}"; do
+            mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
+        done
+        testmsg "Disabled ${#groupA[@]} of $n candidates; ${#groupB[@]} still active. Test the site."
+
+        ask_resolved
+
+        # Re-enable group A regardless; we only narrow the candidate set.
+        for NAME in "${groupA[@]}"; do
+            [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+        done
+
+        if [[ "$RESOLVED" == "yes" ]]; then
+            info "Culprit is among the ${#groupA[@]} disabled plugin(s)."
+            candidates=("${groupA[@]}")
+        else
+            info "Culprit is among the ${#groupB[@]} active plugin(s)."
+            candidates=("${groupB[@]}")
+        fi
+    done
+
+    local CULPRIT="${candidates[0]}"
+    local P="$PLUGINS/$CULPRIT"
+
+    echo
+    info "Binary search narrowed down to: $CULPRIT"
+    mv "$P" "$P.off" || { error "Failed to disable $CULPRIT"; exit 1; }
+    testmsg "Disabled: $CULPRIT — verify the site one last time."
+
+    ask_resolved
+    if [[ "$RESOLVED" == "yes" ]]; then
+        if confirm_problem "$CULPRIT"; then
+            success "Problematic plugin found: $CULPRIT"
+            info "Left disabled at: $P.off"
+            exit 0
+        fi
+    else
+        error "Disabling $CULPRIT did not resolve the issue."
+        info "The problem may involve multiple plugins; try linear mode."
+    fi
+
+    mv "$P.off" "$P"
+    info "Restored: $CULPRIT"
+    exit 0
+}
+
+if [[ "$STRATEGY" == "binary" ]]; then
+    binary_search
+fi
 
 #############################################
 #                PHASE 1                   #
