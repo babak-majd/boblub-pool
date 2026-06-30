@@ -116,6 +116,26 @@ cd "$WEBROOT" || { echo -e "${RED}Cannot access webroot!${NC}"; exit 1; }
 
 
 #############################################
+#  Shared core file list (used by replace & rollback)
+#############################################
+CORE_FILES=(
+  index.php wp-activate.php wp-blog-header.php wp-comments-post.php
+  wp-cron.php wp-links-opml.php wp-load.php wp-login.php
+  wp-mail.php wp-settings.php wp-signup.php wp-trackback.php
+  xmlrpc.php license.txt readme.html wp-config-sample.php
+)
+
+
+#############################################
+#  Detect currently installed version
+#############################################
+WP_VERSION=""
+if [[ -f "wp-includes/version.php" ]]; then
+    WP_VERSION=$(grep "\$wp_version =" wp-includes/version.php | cut -d"'" -f2)
+fi
+
+
+#############################################
 #  STEP 2 — Menu
 #############################################
 
@@ -123,20 +143,28 @@ echo
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYAN}      Select WordPress Operation      ${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+if [[ -n "$WP_VERSION" ]]; then
+    echo -e "  ${BLUE}Current version:${NC} ${GREEN}$WP_VERSION${NC}"
+else
+    echo -e "  ${BLUE}Current version:${NC} ${YELLOW}not detected${NC}"
+fi
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo
 echo -e "${YELLOW}1) Repair existing version${NC}"
 echo -e "${YELLOW}2) Update to latest version${NC}"
 echo -e "${YELLOW}3) Install WordPress 6.9.4${NC}"
 echo -e "${YELLOW}4) Install custom version${NC}"
+echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo
 
-read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
+read -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" choice
 
 case $choice in
     1) action="repair" ;;
     2) action="update" ;;
     3) action="v694" ;;
     4) action="custom" ;;
+    5) action="rollback" ;;
     *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
 esac
 
@@ -163,12 +191,65 @@ fi
 
 
 #############################################
+#  ROLLBACK — Restore previous core from old-core
+#############################################
+if [[ "$action" == "rollback" ]]; then
+    if [[ ! -d "old-core" ]] || { [[ ! -d "old-core/wp-admin" ]] && [[ ! -d "old-core/wp-includes" ]]; }; then
+        echo -e "${RED}✘ No old-core backup found. Nothing to roll back.${NC}"
+        exit 1
+    fi
+
+    OLD_VERSION=$(grep "\$wp_version =" old-core/wp-includes/version.php 2>/dev/null | cut -d"'" -f2)
+
+    echo -e "${BLUE}Current version :${NC} ${WP_VERSION:-unknown}"
+    echo -e "${BLUE}Rollback target :${NC} ${OLD_VERSION:-unknown}"
+    read -p "$(echo -e ${YELLOW}'Restore the previous core? This replaces the current core [y/N]: '${NC})" CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+
+    echo -e "${BLUE}Removing current core files...${NC}"
+    rm -rf wp-admin wp-includes
+    for f in "${CORE_FILES[@]}"; do
+        [[ -f "$f" ]] && rm -f "$f"
+    done
+
+    echo -e "${BLUE}Restoring core from old-core...${NC}"
+    mv old-core/wp-admin ./ 2>/dev/null
+    mv old-core/wp-includes ./ 2>/dev/null
+    for f in "${CORE_FILES[@]}"; do
+        [[ -f "old-core/$f" ]] && mv "old-core/$f" ./
+    done
+    rmdir old-core 2>/dev/null
+
+    echo -e "${MAGENTA}Applying permissions...${NC}"
+    find wp-admin wp-includes -type d -exec chmod 755 {} + 2>/dev/null
+    find wp-admin wp-includes -type f -exec chmod 644 {} + 2>/dev/null
+    for f in "${CORE_FILES[@]}"; do
+        [[ -f "$f" ]] && chmod 644 "$f" 2>/dev/null
+    done
+    if [[ -n "$OWNER" ]]; then
+        chown -R "$OWNER:$GROUP" wp-admin wp-includes 2>/dev/null
+        for f in "${CORE_FILES[@]}"; do
+            [[ -e "$f" ]] && chown "$OWNER:$GROUP" "$f" 2>/dev/null
+        done
+    fi
+
+    echo
+    echo -e "${GREEN}✔ Rollback completed. Restored version: ${OLD_VERSION:-unknown}${NC}"
+    echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
+    echo
+    exit 0
+fi
+
+
+#############################################
 #  STEP 5 — Determine package URL
 #############################################
 
 if [[ "$action" == "repair" ]]; then
-    echo -e "${BLUE}Detecting installed WordPress version...${NC}"
-    WP_VERSION=$(grep "\$wp_version =" wp-includes/version.php | cut -d"'" -f2)
+    if [[ -z "$WP_VERSION" ]]; then
+        echo -e "${RED}✘ Could not detect installed version to repair.${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}✔ Installed Version: $WP_VERSION${NC}"
     DOWNLOAD_URL_IR="http://mirror-ir.iswps.ir/core/wp$WP_VERSION.zip"
     DOWNLOAD_URL_ORG="https://wordpress.org/wordpress-$WP_VERSION.zip"
@@ -224,13 +305,6 @@ echo -e "${BLUE}Moving old WordPress core files into old-core...${NC}"
 
 mv wp-admin old-core/ 2>/dev/null
 mv wp-includes old-core/ 2>/dev/null
-
-CORE_FILES=(
-  index.php wp-activate.php wp-blog-header.php wp-comments-post.php
-  wp-cron.php wp-links-opml.php wp-load.php wp-login.php
-  wp-mail.php wp-settings.php wp-signup.php wp-trackback.php
-  xmlrpc.php license.txt readme.html wp-config-sample.php
-)
 
 for f in "${CORE_FILES[@]}"; do
     [[ -f "$f" ]] && mv "$f" old-core/
