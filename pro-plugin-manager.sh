@@ -319,11 +319,220 @@ install_blue_guard() {
 }
 
 
+# Read a plugin's version from a plugin directory (dir + slug).
+# Mirrors how WordPress get_file_data() reads the "Version:" header: leading
+# whitespace / tabs / * / # / @ are tolerated. Falls back to readme.txt
+# "Stable tag:". Prints the version (empty if none found).
+read_plugin_header_version() {
+    local dir="$1" slug="$2" ver="" main="$1/$2.php"
+
+    if [[ -f "$main" ]]; then
+        ver=$(sed -n '1,50p' "$main" \
+            | grep -iE '^[[:space:]/*#@]*Version:[[:space:]]*[0-9]' \
+            | head -n1 \
+            | sed -E 's/^[[:space:]/*#@]*[Vv]ersion:[[:space:]]*//' \
+            | sed -E 's/[[:space:]].*$//' \
+            | tr -d '\r')
+    fi
+
+    if [[ -z "$ver" && -f "$dir/readme.txt" ]]; then
+        ver=$(grep -iE '^[[:space:]]*Stable tag:' "$dir/readme.txt" \
+            | head -n1 | sed -E 's/^[[:space:]]*[Ss]table tag:[[:space:]]*//' | tr -d '\r')
+    fi
+
+    printf '%s' "$ver"
+}
+
+#############################################
+#  FEATURE: Generic plugin manager
+#  Repair / Update / Install version / Rollback for a single
+#  wordpress.org plugin (official source first, whodns.ir fallback).
+#############################################
+manage_plugin() {
+    local slug="$1"
+    require_wordpress || return 1
+    detect_owner
+
+    local PLUGIN_DIR="wp-content/plugins/$slug"
+    local BACKUP_DIR="old-$slug"
+
+    # Detect currently installed version (header/readme, then wp-cli if handy).
+    local CUR_VER
+    CUR_VER=$(read_plugin_header_version "$PLUGIN_DIR" "$slug")
+    if [[ -z "$CUR_VER" ]] && command -v wp >/dev/null 2>&1; then
+        CUR_VER=$(wp --allow-root plugin get "$slug" --field=version 2>/dev/null | tr -d '\r')
+    fi
+
+    # Menu
+    echo
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}      Manage plugin: ${slug}${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    if [[ -n "$CUR_VER" ]]; then
+        echo -e "  ${BLUE}Current version:${NC} ${GREEN}$CUR_VER${NC}"
+    else
+        echo -e "  ${BLUE}Current version:${NC} ${YELLOW}not detected${NC}"
+    fi
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo
+    echo -e "${YELLOW}1) Repair current version${NC}"
+    echo -e "${YELLOW}2) Update to latest version${NC}"
+    echo -e "${YELLOW}3) Install specific version${NC}"
+    echo -e "${YELLOW}4) Rollback to previous ($BACKUP_DIR)${NC}"
+    echo
+
+    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" p_choice
+
+    local TARGET_VER=""
+    case "$p_choice" in
+        1)
+            if [[ -z "$CUR_VER" ]]; then
+                echo -e "${RED}✘ Could not detect installed version to repair.${NC}"
+                return 1
+            fi
+            TARGET_VER="$CUR_VER"
+            ;;
+        2)
+            TARGET_VER=""   # latest
+            ;;
+        3)
+            read -p "$(echo -e ${YELLOW}"Enter version (example: 10.9.0): "${NC})" TARGET_VER
+            if [[ -z "$TARGET_VER" ]]; then
+                echo -e "${RED}✘ Version cannot be empty.${NC}"
+                return 1
+            fi
+            ;;
+        4)
+            plugin_rollback "$slug"
+            return $?
+            ;;
+        *)
+            echo -e "${RED}Invalid choice!${NC}"
+            return 1
+            ;;
+    esac
+
+    # Build download URLs (official primary, whodns.ir fallback)
+    local OFFICIAL_URL FALLBACK_URL
+    if [[ -z "$TARGET_VER" ]]; then
+        OFFICIAL_URL="https://downloads.wordpress.org/plugin/$slug.zip"
+        FALLBACK_URL="https://whodns.ir/?r=plugins&dl=$slug"
+    else
+        OFFICIAL_URL="https://downloads.wordpress.org/plugin/$slug.$TARGET_VER.zip"
+        FALLBACK_URL="https://whodns.ir/?r=plugins&dl=$slug&ver=$TARGET_VER"
+    fi
+
+    # Download (official first, then fallback)
+    echo -e "${BLUE}↓ Downloading $slug package...${NC}"
+    if ! wget -O plugin.zip "$OFFICIAL_URL"; then
+        echo -e "${YELLOW}Official source failed, trying whodns.ir mirror...${NC}"
+        wget -O plugin.zip "$FALLBACK_URL" || {
+            echo -e "${RED}Download failed!${NC}"
+            rm -f plugin.zip
+            return 1
+        }
+    fi
+
+    # Extract
+    echo -e "${BLUE}Extracting...${NC}"
+    rm -rf "$slug" 2>/dev/null
+    unzip -q plugin.zip
+
+    if [[ ! -d "$slug" ]]; then
+        echo -e "${RED}✘ Extraction failed (expected '$slug/' directory).${NC}"
+        rm -f plugin.zip
+        return 1
+    fi
+
+    # Backup old plugin instead of deleting
+    if [[ -d "$PLUGIN_DIR" ]]; then
+        echo -e "${BLUE}Backing up current plugin into $BACKUP_DIR/...${NC}"
+        rm -rf "$BACKUP_DIR"
+        mv "$PLUGIN_DIR" "$BACKUP_DIR"
+    fi
+
+    # Move new plugin into place
+    echo -e "${BLUE}Installing new plugin core...${NC}"
+    mv "$slug" wp-content/plugins/
+
+    echo -e "${BLUE}Cleaning temporary files...${NC}"
+    rm -f plugin.zip
+
+    # Fix permissions
+    echo -e "${MAGENTA}Applying permissions...${NC}"
+    find "$PLUGIN_DIR" \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
+    if [[ -n "$OWNER" ]]; then
+        chown -R "$OWNER:$GROUP" "$PLUGIN_DIR" 2>/dev/null
+    fi
+
+    # Activate + verify
+    echo -e "${MAGENTA}Activating plugin...${NC}"
+    if resolve_wp_cli; then
+        if $WP_CMD plugin activate "$slug" >/dev/null 2>&1; then
+            echo -e "${GREEN}✔ Plugin activated${NC}"
+        else
+            echo -e "${YELLOW}✘ Activation failed — activate manually from WP-Admin.${NC}"
+        fi
+
+        echo -e "${MAGENTA}Checking plugin status...${NC}"
+        if $WP_CMD plugin is-active "$slug" >/dev/null 2>&1; then
+            echo -e "${GREEN}✔ $slug is ACTIVE${NC}"
+        else
+            echo -e "${YELLOW}✘ $slug is NOT active${NC}"
+        fi
+        echo
+        $WP_CMD plugin status "$slug" 2>/dev/null || true
+    else
+        echo -e "${YELLOW}⚠ No wp-cli available. Please activate $slug from WP-Admin.${NC}"
+    fi
+
+    echo
+    echo -e "${GREEN}✔ $slug installed/updated/repaired successfully!${NC}"
+    echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
+    echo
+}
+
+# Restore a plugin from its old-<slug> backup directory.
+plugin_rollback() {
+    local slug="$1"
+    local PLUGIN_DIR="wp-content/plugins/$slug"
+    local BACKUP_DIR="old-$slug"
+
+    if [[ ! -d "$BACKUP_DIR" ]]; then
+        echo -e "${RED}✘ No $BACKUP_DIR backup found. Nothing to roll back.${NC}"
+        return 1
+    fi
+
+    local OLD_VER
+    OLD_VER=$(read_plugin_header_version "$BACKUP_DIR" "$slug")
+
+    echo -e "${BLUE}Rollback target :${NC} ${OLD_VER:-unknown}"
+    read -p "$(echo -e ${YELLOW}'Restore the previous plugin? This replaces the current one [y/N]: '${NC})" CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
+
+    echo -e "${BLUE}Removing current plugin...${NC}"
+    rm -rf "$PLUGIN_DIR"
+
+    echo -e "${BLUE}Restoring plugin from $BACKUP_DIR...${NC}"
+    mv "$BACKUP_DIR" "$PLUGIN_DIR"
+
+    echo -e "${MAGENTA}Applying permissions...${NC}"
+    find "$PLUGIN_DIR" \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
+    if [[ -n "$OWNER" ]]; then
+        chown -R "$OWNER:$GROUP" "$PLUGIN_DIR" 2>/dev/null
+    fi
+
+    echo
+    echo -e "${GREEN}✔ Rollback completed. Restored version: ${OLD_VER:-unknown}${NC}"
+    echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
+    echo
+}
+
 #############################################
 #  FEATURE STUBS (develop these gradually)
 #############################################
 manage_woocommerce() {
-    echo -e "${YELLOW}WooCommerce Manager is not implemented yet. Coming soon.${NC}"
+    manage_plugin woocommerce
 }
 
 manage_elementor() {
@@ -475,7 +684,7 @@ show_menu() {
     echo -e "${CYAN}      Select WP Plugin Operation       ${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo
-    echo -e "${YELLOW}1) WooCommerce Manager (Soon)${NC}"
+    echo -e "${YELLOW}1) WooCommerce Manager${NC}"
     echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
     echo -e "${YELLOW}3) Search And Replace${NC}"
     echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
