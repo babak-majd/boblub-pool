@@ -1,1 +1,50 @@
 # boblub-pool
+
+A pool of Bash utility scripts for managing WordPress and mail servers, maintained by [bobclub.ir](https://bobclub.ir).
+
+Each script is standalone, dependency-light, and ships with a styled terminal UI. They are meant to be run **on the server** they operate on (they touch paths like `/var/www/html` and `/var/log`, and most need `root`).
+
+- **Website:** https://bobclub.ir
+- **Pool:** https://bobclub.ir/pool
+- **Telegram:** https://t.me/bob_club
+
+## Scripts
+
+| Script | What it does |
+| --- | --- |
+| [`pro-plugin-manager.sh`](pro-plugin-manager.sh) | Menu-driven WordPress plugin operations — install, update, repair, and rollback. |
+| [`plugin-hunter.sh`](plugin-hunter.sh) | Scan a WordPress install for plugins and log the results to `/var/log/plugin-hunter.log`. |
+| [`wp-core.sh`](wp-core.sh) | Repair, update, or install WordPress core. |
+| [`fix-roundcube.sh`](fix-roundcube.sh) | Repair and reconfigure a Roundcube webmail installation. |
+| [`thing-to-link.sh`](thing-to-link.sh) | Fetch a local file or a remote URL into the web root and make it accessible. |
+
+## Usage
+
+Clone the repo (or download a single script), then run it:
+
+```bash
+git clone git@github.com:babak-majd/boblub-pool.git
+cd boblub-pool
+
+chmod +x pro-plugin-manager.sh
+sudo ./pro-plugin-manager.sh
+```
+
+Or run a single script directly from the pool:
+
+```bash
+curl -fsSL https://bobclub.ir/pool/pro-plugin-manager.sh | sudo bash
+```
+
+> **Note:** These scripts modify live server configuration, files, and databases.
+> Read a script before running it, run it on the correct host, and take a backup first.
+
+## Requirements
+
+- A Linux server (Debian/Ubuntu-oriented).
+- `bash`, plus common tooling used per script (e.g. `wp-cli`, `wget`/`curl`, `mysql`).
+- `root` / `sudo` for scripts that write to the web root or system config.
+
+## License
+
+No license specified yet — all rights reserved unless stated otherwise.
