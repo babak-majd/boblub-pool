@@ -53,4 +53,5 @@ bash <(curl -kLs https://material.bobclub.ir/thing-to-link.sh)
 
 ## License
 
-No license specified yet — all rights reserved unless stated otherwise.
+Released into the public domain under [The Unlicense](LICENSE).
+Do whatever you want with these scripts — anywhere, for any purpose, no attribution required.
