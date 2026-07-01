@@ -465,25 +465,31 @@ manage_plugin() {
         chown -R "$OWNER:$GROUP" "$PLUGIN_DIR" 2>/dev/null
     fi
 
-    # Activate + verify
-    echo -e "${MAGENTA}Activating plugin...${NC}"
-    if resolve_wp_cli; then
-        if $WP_CMD plugin activate "$slug" >/dev/null 2>&1; then
-            echo -e "${GREEN}✔ Plugin activated${NC}"
-        else
-            echo -e "${YELLOW}✘ Activation failed — activate manually from WP-Admin.${NC}"
-        fi
+    # Activate + verify (optional, ask first)
+    echo
+    read -p "$(echo -e ${YELLOW}"Activate $slug now with wp-cli? [y/N]: "${NC})" ACT_CONFIRM
+    if [[ "$ACT_CONFIRM" =~ ^[Yy]$ ]]; then
+        echo -e "${MAGENTA}Activating plugin...${NC}"
+        if resolve_wp_cli; then
+            if $WP_CMD plugin activate "$slug" >/dev/null 2>&1; then
+                echo -e "${GREEN}✔ Plugin activated${NC}"
+            else
+                echo -e "${YELLOW}✘ Activation failed — activate manually from WP-Admin.${NC}"
+            fi
 
-        echo -e "${MAGENTA}Checking plugin status...${NC}"
-        if $WP_CMD plugin is-active "$slug" >/dev/null 2>&1; then
-            echo -e "${GREEN}✔ $slug is ACTIVE${NC}"
+            echo -e "${MAGENTA}Checking plugin status...${NC}"
+            if $WP_CMD plugin is-active "$slug" >/dev/null 2>&1; then
+                echo -e "${GREEN}✔ $slug is ACTIVE${NC}"
+            else
+                echo -e "${YELLOW}✘ $slug is NOT active${NC}"
+            fi
+            echo
+            $WP_CMD plugin status "$slug" 2>/dev/null || true
         else
-            echo -e "${YELLOW}✘ $slug is NOT active${NC}"
+            echo -e "${YELLOW}⚠ No wp-cli available. Please activate $slug from WP-Admin.${NC}"
         fi
-        echo
-        $WP_CMD plugin status "$slug" 2>/dev/null || true
     else
-        echo -e "${YELLOW}⚠ No wp-cli available. Please activate $slug from WP-Admin.${NC}"
+        echo -e "${BLUE}Skipped activation. Activate $slug from WP-Admin when ready.${NC}"
     fi
 
     echo
@@ -708,3 +714,4 @@ main() {
 }
 
 main "$@"
+# 12
