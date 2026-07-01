@@ -477,7 +477,7 @@ show_menu() {
     echo
     echo -e "${YELLOW}1) WooCommerce Manager (Soon)${NC}"
     echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
-    echo -e "${YELLOW}3) Search And Replace (Beta)${NC}"
+    echo -e "${YELLOW}3) Search And Replace${NC}"
     echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
     echo
 }
