@@ -30,10 +30,16 @@ chmod +x pro-plugin-manager.sh
 sudo ./pro-plugin-manager.sh
 ```
 
-Or run a single script directly from the pool:
+Or run a single script directly, without cloning — straight from GitHub:
 
 ```bash
-curl -fsSL https://bobclub.ir/pool/pro-plugin-manager.sh | sudo bash
+bash <(curl -kLs https://raw.githubusercontent.com/babak-majd/boblub-pool/refs/heads/main/plugin-hunter.sh)
+```
+
+or from the pool mirror:
+
+```bash
+bash <(curl -kLs https://material.bobclub.ir/thing-to-link.sh)
 ```
 
 > **Note:** These scripts modify live server configuration, files, and databases.
