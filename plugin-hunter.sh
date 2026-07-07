@@ -136,15 +136,29 @@ cancel_scan(){
 # On Ctrl+C / TERM, leave the site exactly as we found it.
 trap cancel_scan INT TERM
 
-# ---------- Domain ----------
-read -r -p "Enter domain (without https://): " DOMAIN
-BASE_URL="https://$DOMAIN/wp-json/"
-info "API endpoint: $BASE_URL"
+# ---------- Domain (automate mode only) ----------
+# The domain is only used for automated HTTP health checks. In manual mode the
+# user inspects the site themselves, so there is nothing to ask for here.
+if [[ "$MODE" == "automate" ]]; then
+    read -r -p "Enter domain (without https://): " DOMAIN
+    CHECK_URL="https://$DOMAIN/"
+    info "Health-check URL: $CHECK_URL"
+fi
 
-# ---------- API Check ----------
-check_wp_api() {
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL")
-    [[ "$HTTP_CODE" == "200" ]] && echo "OK" || echo "FAIL"
+# ---------- Site Health Check ----------
+# A working WordPress front page responds with HTTP 200. When a plugin breaks
+# the site the page returns an error instead — a 5xx fatal error, a timeout, or
+# (as with this target) a 404 homepage — so anything other than 200 means the
+# problem is still present.
+#
+# We probe the real front page, NOT /wp-json/: the REST endpoint keeps
+# returning 200 even while the public site is broken, which would make automate
+# mode declare the first disabled plugin "the fix" on every run.
+check_site() {
+    local code
+    code=$(curl -s -L -o /dev/null -w "%{http_code}" \
+        --connect-timeout 10 --max-time 25 "$CHECK_URL")
+    [[ "$code" == "200" ]] && echo "OK" || echo "FAIL"
 }
 
 # ---------- Confirm Problematic Plugin ----------
@@ -155,7 +169,7 @@ confirm_problem() {
 }
 
 # ---------- Resolved Check (sets RESOLVED to yes/no) ----------
-# Manual mode asks the user; automate mode probes the WP REST API.
+# Manual mode asks the user; automate mode probes the site's front page.
 ask_resolved() {
     RESOLVED="no"
     if [[ "$MODE" == "manual" ]]; then
@@ -164,8 +178,8 @@ ask_resolved() {
         [[ "$ANS" =~ ^[Yy]$ ]] && RESOLVED="yes"
     else
         local RESULT
-        RESULT=$(check_wp_api)
-        info "API Status: $RESULT"
+        RESULT=$(check_site)
+        info "Site status: $RESULT"
         [[ "$RESULT" == "OK" ]] && RESOLVED="yes"
     fi
 }
@@ -278,8 +292,8 @@ for NAME in "${PLUGS[@]}"; do
             continue
         fi
     else
-        RESULT=$(check_wp_api)
-        info "API Status: $RESULT"
+        RESULT=$(check_site)
+        info "Site status: $RESULT"
 
         if [[ "$RESULT" == "OK" ]]; then
             if confirm_problem "$NAME"; then
@@ -338,8 +352,8 @@ else
                 success "$NAME is OK."
             fi
         else
-            RESULT=$(check_wp_api)
-            info "API Status: $RESULT"
+            RESULT=$(check_site)
+            info "Site status: $RESULT"
 
             if [[ "$RESULT" == "FAIL" ]]; then
                 error "$NAME is problematic. Disabling again."
