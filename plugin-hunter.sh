@@ -47,11 +47,76 @@ print_header() {
 }
 print_header
 
+# ---------- Resolve WordPress Path ----------
+# An explicit path as $1 always wins. Otherwise ask for a domain and locate its
+# webroot on the server (cPanel / DirectAdmin); an empty answer falls back to
+# the current directory. A resolved domain is reused for the automate health
+# check below, so it is never asked for twice.
+resolve_webroot() {
+    local USER U MAINDOMAIN CONF CONF_DOMAIN DOCROOT
+    read -r -p "Enter domain (or press Enter to use the current directory): " DOMAIN
+
+    if [ -z "$DOMAIN" ]; then
+        WP_DIR="$(pwd -P)"
+        info "No domain entered. Using current directory: $WP_DIR"
+        return 0
+    fi
+
+    # cPanel
+    if [ -d "/usr/local/cpanel" ]; then
+        info "Control panel detected: cPanel"
+        for USER in /var/cpanel/users/*; do
+            [ -f "$USER" ] || continue
+            U=$(basename "$USER")
+
+            # Main domain
+            MAINDOMAIN=$(grep "^DNS=" "$USER" | cut -d= -f2)
+            if [ "$MAINDOMAIN" = "$DOMAIN" ]; then
+                WP_DIR="/home/$U/public_html"
+                break
+            fi
+
+            # Addon / parked domains
+            if [ -f "/var/cpanel/userdata/$U/$DOMAIN" ]; then
+                WP_DIR=$(grep "documentroot:" "/var/cpanel/userdata/$U/$DOMAIN" | awk '{print $2}')
+                break
+            fi
+        done
+    fi
+
+    # DirectAdmin
+    if [ -d "/usr/local/directadmin" ] && [ -z "$WP_DIR" ]; then
+        info "Control panel detected: DirectAdmin"
+        for USER in /usr/local/directadmin/data/users/*; do
+            [ -d "$USER/domains" ] || continue
+            U=$(basename "$USER")
+            for CONF in "$USER/domains"/*.conf; do
+                [ -f "$CONF" ] || continue
+                CONF_DOMAIN=$(basename "$CONF" .conf)
+                if [ "$CONF_DOMAIN" = "$DOMAIN" ]; then
+                    DOCROOT=$(grep "^document_root=" "$CONF" | cut -d= -f2)
+                    WP_DIR=${DOCROOT:-"/home/$U/domains/$DOMAIN/public_html"}
+                    break 2
+                fi
+            done
+        done
+    fi
+
+    if [ -z "$WP_DIR" ]; then
+        error "Domain '$DOMAIN' not found on this server (cPanel/DirectAdmin)."
+        return 1
+    fi
+
+    info "Resolved webroot: $WP_DIR"
+    return 0
+}
+
 # ---------- WP Path ----------
+WP_DIR=""
 if [ -n "$1" ]; then
     WP_DIR="$1"
 else
-    WP_DIR="$(pwd -P)"
+    resolve_webroot || exit 1
 fi
 
 PLUGINS="$WP_DIR/wp-content/plugins"
@@ -137,10 +202,14 @@ cancel_scan(){
 trap cancel_scan INT TERM
 
 # ---------- Domain (automate mode only) ----------
-# The domain is only used for automated HTTP health checks. In manual mode the
-# user inspects the site themselves, so there is nothing to ask for here.
+# Automate mode needs a domain for the HTTP health check. Reuse the one entered
+# during webroot resolution if we have it; only prompt when it is still unknown
+# (e.g. a path was passed as $1). Manual mode inspects the site by hand and
+# never needs it.
 if [[ "$MODE" == "automate" ]]; then
-    read -r -p "Enter domain (without https://): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        read -r -p "Enter domain (without https://): " DOMAIN
+    fi
     CHECK_URL="https://$DOMAIN/"
     info "Health-check URL: $CHECK_URL"
 fi
