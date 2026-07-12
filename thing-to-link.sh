@@ -6,7 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
+#   Version   : 1.0.1
 # ════════════════════════════════════════════════════════════
+VERSION="1.0.1"
 set +H
 
 WEBROOT="/var/www/html"
@@ -24,6 +26,7 @@ print_header() {
     echo -e "  Website   : https://bobclub.ir"
     echo -e "  Pool      : https://bobclub.ir/pool"
     echo -e "  Telegram  : https://t.me/bob_club"
+    echo -e "  Version   : ${VERSION}"
     echo -e "${C}${hr}${N}"
     echo
 }

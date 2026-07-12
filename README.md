@@ -19,6 +19,8 @@ Each script is standalone, dependency-light, and ships with a styled terminal UI
 | [`perm-patrol.sh`](perm-patrol.sh) | Patrol a DirectAdmin or cPanel user's home directory: reset ownership, fix web file modes (755/644), and harden sensitive files (`wp-config.php`, `.env`, `.my.cnf`). Supports `--dry-run`. |
 | [`thing-to-link.sh`](thing-to-link.sh) | Fetch a local file or a remote URL into the web root and make it accessible. |
 
+Each script is versioned independently (the `VERSION` at the top of the file, also shown in its terminal header). Per-script release history lives in the bilingual [CHANGELOG.md](CHANGELOG.md).
+
 ## Usage
 
 Clone the repo (or download a single script), then run it:

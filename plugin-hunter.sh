@@ -6,7 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
+#   Version   : 1.4.0
 # ════════════════════════════════════════════════════════════
+VERSION="1.4.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -42,6 +44,7 @@ print_header() {
     echo -e "  Website   : https://bobclub.ir"
     echo -e "  Pool      : https://bobclub.ir/pool"
     echo -e "  Telegram  : https://t.me/bob_club"
+    echo -e "  Version   : ${VERSION}"
     echo -e "${C}${hr}${N}"
     echo
 }
