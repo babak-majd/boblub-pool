@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BobClub | Changelog</title>
+
+    <link rel="stylesheet" href="/pool/resources/fonts/font-face.css?v=20251111">
+
+    <style>
+        :root {
+            --bg: #071a12;
+            --bg2: #0c3728;
+            --accent: #2fbe86;
+            --accent-2: #157a55;
+            --text: #eafff4;
+            --muted: #a7cbbb;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+        }
+
+        body {
+            font-family: Vazir, system-ui, sans-serif;
+            color: var(--text);
+            background: radial-gradient(circle at 50% 0%, var(--bg2) 0%, var(--bg) 60%);
+            background-attachment: fixed;
+            padding: 48px 24px 64px;
+        }
+
+        .wrap {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        /* ---------- Language visibility ---------- */
+        html[data-lang="en"] .fa {
+            display: none !important;
+        }
+
+        html[data-lang="fa"] .en {
+            display: none !important;
+        }
+
+        /* ---------- Header ---------- */
+        header.page {
+            text-align: center;
+            margin-bottom: 36px;
+        }
+
+        h1 {
+            font-size: 2.1rem;
+            margin: 0 0 12px;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            margin: 0;
+            line-height: 1.9;
+        }
+
+        .subtitle code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .85em;
+            color: var(--text);
+            background: rgba(255, 255, 255, .07);
+            border-radius: 6px;
+            padding: 1px 6px;
+            direction: ltr;
+            unicode-bidi: embed;
+        }
+
+        /* ---------- Language switch (floating, top-right) ---------- */
+        .lang-switch {
+            position: fixed;
+            top: 18px;
+            right: 18px;
+            z-index: 100;
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(7, 26, 18, .75);
+            border: 1px solid rgba(255, 255, 255, .12);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+            direction: ltr;
+        }
+
+        .lang-switch button {
+            border: 0;
+            background: transparent;
+            color: var(--muted);
+            font-family: inherit;
+            font-size: .82rem;
+            font-weight: 600;
+            line-height: 1;
+            padding: 8px 16px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+        }
+
+        .lang-switch button:hover {
+            color: var(--text);
+        }
+
+        .lang-switch button.active {
+            background: rgba(47, 190, 134, .18);
+            color: #d9fbec;
+            box-shadow: inset 0 0 0 1px rgba(47, 190, 134, .5);
+        }
+
+        @media (max-width: 520px) {
+            .lang-switch {
+                top: 12px;
+                right: 12px;
+            }
+
+            .lang-switch button {
+                padding: 7px 13px;
+                font-size: .78rem;
+            }
+        }
+
+        /* ---------- TOC chips ---------- */
+        .toc {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 40px;
+            direction: ltr;
+        }
+
+        .toc a {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border-radius: 999px;
+            text-decoration: none;
+            font-size: .8rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: var(--text);
+            background: rgba(255, 255, 255, .05);
+            border: 1px solid rgba(255, 255, 255, .1);
+            transition: transform .15s ease, border-color .15s ease, background .15s ease;
+        }
+
+        .toc a:hover {
+            transform: translateY(-2px);
+            border-color: rgba(47, 190, 134, .45);
+            background: rgba(47, 190, 134, .1);
+        }
+
+        .ver {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .74rem;
+            font-weight: 700;
+            color: #d9fbec;
+            background: rgba(47, 190, 134, .16);
+            border: 1px solid rgba(47, 190, 134, .45);
+            border-radius: 999px;
+            padding: 2px 10px;
+            direction: ltr;
+            unicode-bidi: embed;
+        }
+
+        /* ---------- Script cards ---------- */
+        section.script {
+            background: linear-gradient(160deg, rgba(47, 190, 134, .06), rgba(255, 255, 255, .02));
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 18px;
+            padding: 24px 26px;
+            margin-bottom: 22px;
+            transition: border-color .15s ease, box-shadow .15s ease;
+            scroll-margin-top: 24px;
+        }
+
+        section.script:hover {
+            border-color: rgba(47, 190, 134, .3);
+            box-shadow: 0 14px 34px rgba(0, 0, 0, .3);
+        }
+
+        section.script>h2 {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin: 0 0 6px;
+            font-size: 1.15rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            direction: ltr;
+            text-align: left;
+        }
+
+        /* ---------- Entries ---------- */
+        .entry {
+            padding: 16px 0 4px;
+        }
+
+        .entry+.entry {
+            border-top: 1px dashed rgba(255, 255, 255, .1);
+        }
+
+        .entry-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 6px;
+            direction: ltr;
+        }
+
+        html[dir="rtl"] .entry-head {
+            justify-content: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .entry-head time {
+            color: var(--muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .78rem;
+        }
+
+        .entry ul {
+            margin: 0;
+            padding: 0 22px;
+            color: var(--muted);
+            line-height: 1.9;
+            font-size: .92rem;
+        }
+
+        .entry li::marker {
+            color: var(--accent);
+        }
+
+        .entry code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .85em;
+            color: var(--text);
+            background: rgba(255, 255, 255, .07);
+            border-radius: 6px;
+            padding: 1px 6px;
+            direction: ltr;
+            unicode-bidi: embed;
+        }
+
+        /* ---------- Footer ---------- */
+        footer {
+            margin-top: 48px;
+            text-align: center;
+            color: var(--muted);
+            font-size: .85rem;
+        }
+
+        footer a {
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="lang-switch" role="group" aria-label="Language">
+        <button class="active" type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="fa">فارسی</button>
+    </div>
+
+    <div class="wrap">
+        <header class="page">
+            <h1><span class="en">📜 Changelog</span><span class="fa">📜 تاریخچه تغییرات</span></h1>
+            <p class="subtitle en">Every script in the pool is versioned independently, following
+                <code>SemVer</code>: MAJOR breaking · MINOR feature · PATCH fix.<br>Each script keeps its own history
+                below — newest first.</p>
+            <p class="subtitle fa">هر اسکریپت این مجموعه نسخه‌بندی مستقل خودش را دارد، طبق <code>SemVer</code>:
+                MAJOR تغییر ناسازگار · MINOR قابلیت جدید · PATCH رفع اشکال.<br>تاریخچه هر اسکریپت جداگانه در پایین
+                آمده — جدیدترین بالا.</p>
+        </header>
+
+        <nav class="toc">
+            <a href="#pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></a>
+            <a href="#plugin-hunter">plugin-hunter.sh <span class="ver">1.4.0</span></a>
+            <a href="#wp-core">wp-core.sh <span class="ver">1.2.0</span></a>
+            <a href="#perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></a>
+            <a href="#fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></a>
+            <a href="#thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></a>
+        </nav>
+
+        <!-- ============ pro-plugin-manager.sh ============ -->
+        <section class="script" id="pro-plugin-manager">
+            <h2>pro-plugin-manager.sh <span class="ver">1.5.0</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.5.0</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Added Elementor Manager and updated the menu display.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن مدیریت المنتور (Elementor Manager) و به‌روزرسانی نمایش منو.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.4.0</span><time datetime="2026-07-01">2026-07-01</time>
+                </div>
+                <ul class="en">
+                    <li>Added generic plugin management: install, update, repair, and rollback.</li>
+                    <li>Added optional activation prompt after managing a plugin.</li>
+                    <li>Removed the beta label from the Search &amp; Replace menu option.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن مدیریت عمومی افزونه‌ها: نصب، به‌روزرسانی، تعمیر و بازگردانی (rollback).</li>
+                    <li>افزودن پرسش اختیاری برای فعال‌سازی افزونه پس از مدیریت آن.</li>
+                    <li>حذف برچسب بتا از گزینه جستجو و جایگزینی در منو.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.3.1</span><time datetime="2026-06-29">2026-06-29</time>
+                </div>
+                <ul class="en">
+                    <li>Fixed formatting of the beta label on the Search &amp; Replace menu option.</li>
+                </ul>
+                <ul class="fa">
+                    <li>رفع اشکال قالب‌بندی برچسب بتا در گزینه جستجو و جایگزینی.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.3.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Refactored Search &amp; Replace: streamlined the MySQL fallback and removed the wp-cli
+                        dependency.</li>
+                    <li>Marked the Search &amp; Replace menu option as beta.</li>
+                </ul>
+                <ul class="fa">
+                    <li>بازنویسی جستجو و جایگزینی: ساده‌سازی مسیر جایگزین MySQL و حذف وابستگی به wp-cli.</li>
+                    <li>علامت‌گذاری گزینه جستجو و جایگزینی به‌عنوان بتا.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.2.1</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Standardized the script header with website and contact info, and added a header printing
+                        function.</li>
+                </ul>
+                <ul class="fa">
+                    <li>یکسان‌سازی هدر اسکریپت با اطلاعات وب‌سایت و تماس، و افزودن تابع چاپ هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Added database credential parsing from <code>wp-config.php</code> and a database Search &amp;
+                        Replace feature.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن خواندن اطلاعات اتصال دیتابیس از <code>wp-config.php</code> و قابلیت جستجو و جایگزینی در
+                        دیتابیس.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Refactored the script structure, added feature stubs, and improved webroot resolution.</li>
+                </ul>
+                <ul class="fa">
+                    <li>بازسازی ساختار اسکریپت، افزودن اسکلت قابلیت‌های آینده و بهبود تشخیص مسیر webroot.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release: menu-driven WordPress plugin operations.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه: عملیات منو‌محور روی افزونه‌های وردپرس.</li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ plugin-hunter.sh ============ -->
+        <section class="script" id="plugin-hunter">
+            <h2>plugin-hunter.sh <span class="ver">1.4.0</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.4.0</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Enhanced the site health check to verify full page rendering and detect critical errors.</li>
+                </ul>
+                <ul class="fa">
+                    <li>بهبود بررسی سلامت سایت برای اطمینان از رندر کامل صفحه و تشخیص خطاهای بحرانی.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.3.0</span><time datetime="2026-07-07">2026-07-07</time>
+                </div>
+                <ul class="en">
+                    <li>Resolve the webroot from a domain name.</li>
+                </ul>
+                <ul class="fa">
+                    <li>تشخیص مسیر webroot از روی نام دامنه.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.2.1</span><time datetime="2026-07-07">2026-07-07</time>
+                </div>
+                <ul class="en">
+                    <li>Fixed the automated check and the manual domain prompt.</li>
+                </ul>
+                <ul class="fa">
+                    <li>رفع اشکال بررسی خودکار و پرسش دستی دامنه.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-06-30">2026-06-30</time>
+                </div>
+                <ul class="en">
+                    <li>Added a binary search strategy for faster fault isolation.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن استراتژی جستجوی دودویی برای یافتن سریع‌تر افزونه خراب.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
+                </div>
+                <ul class="en">
+                    <li>Added a cancel option and enabled Phase 2.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن گزینه لغو و فعال‌سازی فاز ۲.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Standardized the script header with website and contact info, and added a header printing
+                        function.</li>
+                </ul>
+                <ul class="fa">
+                    <li>یکسان‌سازی هدر اسکریپت با اطلاعات وب‌سایت و تماس، و افزودن تابع چاپ هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release: scan a WordPress install for plugins and log results.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه: پویش افزونه‌های یک نصب وردپرس و ثبت نتایج در لاگ.</li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ wp-core.sh ============ -->
+        <section class="script" id="wp-core">
+            <h2>wp-core.sh <span class="ver">1.2.0</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Added new helper functions and improved the header descriptions.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن توابع کمکی جدید و بهبود توضیحات هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
+                </div>
+                <ul class="en">
+                    <li>Added a core rollback option and display of the current WordPress version in the menu.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن گزینه بازگردانی هسته (rollback) و نمایش نسخه فعلی وردپرس در منو.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Standardized the script header with website and contact info, and added a header printing
+                        function.</li>
+                </ul>
+                <ul class="fa">
+                    <li>یکسان‌سازی هدر اسکریپت با اطلاعات وب‌سایت و تماس، و افزودن تابع چاپ هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release: repair, update, or install WordPress core, or provision a fresh site.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه: تعمیر، به‌روزرسانی یا نصب هسته وردپرس و راه‌اندازی سایت جدید.</li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ perm-patrol.sh ============ -->
+        <section class="script" id="perm-patrol">
+            <h2>perm-patrol.sh <span class="ver">1.1.1</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.1.1</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Renamed from <code>fix-permissions.sh</code> to <code>perm-patrol.sh</code>.</li>
+                </ul>
+                <ul class="fa">
+                    <li>تغییر نام از <code>fix-permissions.sh</code> به <code>perm-patrol.sh</code>.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Added detailed descriptions and new features.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن توضیحات کامل‌تر و قابلیت‌های جدید.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-07-12">2026-07-12</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release (as <code>fix-permissions.sh</code>): reset ownership, fix file modes, and
+                        harden sensitive files in a panel user's home.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه (با نام <code>fix-permissions.sh</code>): بازنشانی مالکیت، اصلاح دسترسی فایل‌ها و
+                        ایمن‌سازی فایل‌های حساس در هوم کاربر پنل.</li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ fix-roundcube.sh ============ -->
+        <section class="script" id="fix-roundcube">
+            <h2>fix-roundcube.sh <span class="ver">1.0.1</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Standardized the script header with website and contact info, and added a header printing
+                        function.</li>
+                </ul>
+                <ul class="fa">
+                    <li>یکسان‌سازی هدر اسکریپت با اطلاعات وب‌سایت و تماس، و افزودن تابع چاپ هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release: repair and reconfigure Roundcube webmail.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه: تعمیر و پیکربندی مجدد وب‌میل Roundcube.</li>
+                </ul>
+            </article>
+        </section>
+
+        <!-- ============ thing-to-link.sh ============ -->
+        <section class="script" id="thing-to-link">
+            <h2>thing-to-link.sh <span class="ver">1.0.1</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Standardized the script header with website and contact info, and added a header printing
+                        function.</li>
+                </ul>
+                <ul class="fa">
+                    <li>یکسان‌سازی هدر اسکریپت با اطلاعات وب‌سایت و تماس، و افزودن تابع چاپ هدر.</li>
+                </ul>
+            </article>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+                </div>
+                <ul class="en">
+                    <li>Initial release: fetch a file or URL into the web root and make it accessible via link.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتشار اولیه: دریافت فایل یا URL در ریشه وب و در دسترس قرار دادن آن از طریق لینک.</li>
+                </ul>
+            </article>
+        </section>
+
+        <footer>
+            <p>Developed &amp; Licensed with 💙 by <a href="https://BobClub.ir" target="_blank"
+                    rel="noopener">BobClub.ir</a></p>
+        </footer>
+    </div>
+
+    <script>
+        const buttons = document.querySelectorAll('.lang-switch button');
+
+        function applyLang(lang) {
+            const root = document.documentElement;
+            root.lang = lang;
+            root.dir = lang === 'fa' ? 'rtl' : 'ltr';
+            root.dataset.lang = lang;
+            buttons.forEach((b) => b.classList.toggle('active', b.dataset.lang === lang));
+            try { localStorage.setItem('changelog-lang', lang); } catch (e) { /* private mode */ }
+        }
+
+        buttons.forEach((b) => b.addEventListener('click', () => applyLang(b.dataset.lang)));
+
+        try {
+            const saved = localStorage.getItem('changelog-lang');
+            if (saved === 'fa') applyLang('fa');
+        } catch (e) { /* private mode */ }
+    </script>
+</body>
+
+</html>

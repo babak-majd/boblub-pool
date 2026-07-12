@@ -1,0 +1,15 @@
+# bobclub.ir · pool
+# Serve the changelog at /changelog (no .html in the URL).
+
+AddDefaultCharset UTF-8
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # If someone opens /changelog.html directly, redirect them to /changelog
+    RewriteCond %{THE_REQUEST} \s/+changelog\.html[\s?] [NC]
+    RewriteRule ^changelog\.html$ /changelog [R=301,L]
+
+    # Internally serve changelog.html for /changelog
+    RewriteRule ^changelog/?$ changelog.html [L]
+</IfModule>
