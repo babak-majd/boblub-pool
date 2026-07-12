@@ -18,11 +18,31 @@ YELLOW="\e[33m"
 CYAN="\e[36m"
 RESET="\e[0m"
 
+# ---------- Header ----------
+print_header() {
+    local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
+    local hr sr
+    hr=$(printf '━%.0s' {1..48})
+    sr=$(printf '─%.0s' {1..48})
+    echo
+    echo -e "${C}${hr}${N}"
+    echo -e "  ${Y}${B}bobclub.ir${N}  ·  ${B}Fix Permissions${N}"
+    echo -e "  Reset ownership and harden a panel user's home."
+    echo -e "${C}${sr}${N}"
+    echo -e "  Website   : https://bobclub.ir"
+    echo -e "  Pool      : https://bobclub.ir/pool"
+    echo -e "  Telegram  : https://t.me/bob_club"
+    echo -e "${C}${hr}${N}"
+    echo
+}
+
 # ---------- Options ----------
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" || "${1:-}" == "-n" ]]; then
     DRY_RUN=1
 fi
+
+print_header
 
 # ---------- Root check ----------
 if [[ $EUID -ne 0 ]]; then
