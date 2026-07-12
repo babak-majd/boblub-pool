@@ -542,7 +542,7 @@ manage_woocommerce() {
 }
 
 manage_elementor() {
-    echo -e "${YELLOW}Elementor Manager is not implemented yet. Coming soon.${NC}"
+    manage_plugin elementor
 }
 
 #############################################
@@ -691,7 +691,7 @@ show_menu() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo
     echo -e "${YELLOW}1) WooCommerce Manager${NC}"
-    echo -e "${YELLOW}2) Elementor Manager (Soon)${NC}"
+    echo -e "${YELLOW}2) Elementor Manager${NC}"
     echo -e "${YELLOW}3) Search And Replace${NC}"
     echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
     echo
