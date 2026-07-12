@@ -215,19 +215,33 @@ if [[ "$MODE" == "automate" ]]; then
 fi
 
 # ---------- Site Health Check ----------
-# A working WordPress front page responds with HTTP 200. When a plugin breaks
-# the site the page returns an error instead — a 5xx fatal error, a timeout, or
-# (as with this target) a 404 homepage — so anything other than 200 means the
-# problem is still present.
+# A working WordPress front page responds with HTTP 200 AND a fully rendered
+# page. HTTP 200 alone is not enough: a broken plugin often triggers a PHP fatal
+# error *after* wp_head() has already flushed the <head>, so the status line
+# stays 200 while the body is cut off mid-render (no </html>) or replaced by
+# WordPress's critical-error notice. Checking only the code would mark such a
+# "200-but-broken" homepage OK — exactly the failure this guards against.
 #
 # We probe the real front page, NOT /wp-json/: the REST endpoint keeps
 # returning 200 even while the public site is broken, which would make automate
 # mode declare the first disabled plugin "the fix" on every run.
 check_site() {
-    local code
-    code=$(curl -s -L -o /dev/null -w "%{http_code}" \
+    local resp code body
+    # Fetch body + status in one request; -w appends the code on its own line.
+    resp=$(curl -s -L -w '\n%{http_code}' \
         --connect-timeout 10 --max-time 25 "$CHECK_URL")
-    [[ "$code" == "200" ]] && echo "OK" || echo "FAIL"
+    code="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+
+    if [[ "$code" != "200" ]]; then
+        echo "FAIL"
+    elif grep -qiE 'there has been a critical error|<b>Fatal error|WordPress database error' <<<"$body"; then
+        echo "FAIL"
+    elif ! grep -qi '</html>' <<<"$body"; then
+        echo "FAIL"
+    else
+        echo "OK"
+    fi
 }
 
 # ---------- Confirm Problematic Plugin ----------
