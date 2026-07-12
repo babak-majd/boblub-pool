@@ -16,6 +16,7 @@ Each script is standalone, dependency-light, and ships with a styled terminal UI
 | [`plugin-hunter.sh`](plugin-hunter.sh) | Scan a WordPress install for plugins and log the results to `/var/log/plugin-hunter.log`. |
 | [`wp-core.sh`](wp-core.sh) | Repair, update, or install WordPress core. |
 | [`fix-roundcube.sh`](fix-roundcube.sh) | Repair and reconfigure a Roundcube webmail installation. |
+| [`fix-permissions.sh`](fix-permissions.sh) | Reset ownership, fix web file modes (755/644), and harden sensitive files (`wp-config.php`, `.env`, `.my.cnf`) under a DirectAdmin or cPanel user's home directory (supports `--dry-run`). |
 | [`thing-to-link.sh`](thing-to-link.sh) | Fetch a local file or a remote URL into the web root and make it accessible. |
 
 ## Usage
