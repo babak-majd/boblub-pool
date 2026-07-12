@@ -1,8 +1,8 @@
 #!/bin/bash
 # ════════════════════════════════════════════════════════════
-#   bobclub.ir  ·  Fix Permissions
-#   Reset ownership, file modes and harden sensitive files
-#   under a panel user's home directory.
+#   bobclub.ir  ·  Perm Patrol
+#   Patrol a panel user's home: reset ownership, fix file
+#   modes and harden sensitive files.
 # ────────────────────────────────────────────────────────────
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
@@ -26,8 +26,8 @@ print_header() {
     sr=$(printf '─%.0s' {1..48})
     echo
     echo -e "${C}${hr}${N}"
-    echo -e "  ${Y}${B}bobclub.ir${N}  ·  ${B}Fix Permissions${N}"
-    echo -e "  Reset ownership and harden a panel user's home."
+    echo -e "  ${Y}${B}bobclub.ir${N}  ·  ${B}Perm Patrol${N}"
+    echo -e "  Patrol a panel user's home: ownership & permissions."
     echo -e "${C}${sr}${N}"
     echo -e "  Website   : https://bobclub.ir"
     echo -e "  Pool      : https://bobclub.ir/pool"
