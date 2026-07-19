@@ -309,8 +309,8 @@ create_database() {
 fresh_install() {
     echo
     echo -e "${YELLOW}Fresh WordPress installation into:${NC} $WEBROOT"
-    read -p "$(echo -e ${CYAN}'Version to install [default 6.9.4, type a version, or "latest"]: '${NC})" INSTALL_VERSION
-    INSTALL_VERSION=${INSTALL_VERSION:-6.9.4}
+    read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5, type a version, or "latest"]: '${NC})" INSTALL_VERSION
+    INSTALL_VERSION=${INSTALL_VERSION:-6.9.5}
 
     echo -e "${RED}⚠ This moves EVERY existing file in the webroot into old-files/.${NC}"
     read -p "$(echo -e ${YELLOW}'Proceed with fresh install? [y/N]: '${NC})" CONFIRM
@@ -550,7 +550,7 @@ fi
 
 echo -e "${YELLOW}1) Repair existing version${NC}"
 echo -e "${YELLOW}2) Update to latest version${NC}"
-echo -e "${YELLOW}3) Install WordPress 6.9.4${NC}"
+echo -e "${YELLOW}3) Install WordPress 6.9.5${NC}"
 echo -e "${YELLOW}4) Install custom version${NC}"
 echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo -e "${YELLOW}6) Manage administrator users${NC}"
@@ -561,7 +561,7 @@ read -p "$(echo -e ${GREEN}"Enter choice [1-6]: "${NC})" choice
 case $choice in
     1) action="repair" ;;
     2) action="update" ;;
-    3) action="v694" ;;
+    3) action="v695" ;;
     4) action="custom" ;;
     5) action="rollback" ;;
     6) manage_admins; exit $? ;;
@@ -644,8 +644,8 @@ if [[ "$action" == "repair" ]]; then
 elif [[ "$action" == "update" ]]; then
     version_urls "latest"
 
-elif [[ "$action" == "v694" ]]; then
-    version_urls "6.9.4"
+elif [[ "$action" == "v695" ]]; then
+    version_urls "6.9.5"
 
 elif [[ "$action" == "custom" ]]; then
     read -p "Enter custom WP version (example: 6.8.3): " CUSTOM_VERSION
