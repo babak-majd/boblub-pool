@@ -132,7 +132,7 @@
             }
         }
 
-        /* ---------- TOC chips ---------- */
+        /* ---------- Filter chips (TOC) ---------- */
         .toc {
             display: flex;
             flex-wrap: wrap;
@@ -142,25 +142,32 @@
             direction: ltr;
         }
 
-        .toc a {
+        .toc button {
             display: inline-flex;
             align-items: center;
             gap: 8px;
             padding: 7px 14px;
             border-radius: 999px;
-            text-decoration: none;
             font-size: .8rem;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             color: var(--text);
             background: rgba(255, 255, 255, .05);
             border: 1px solid rgba(255, 255, 255, .1);
+            cursor: pointer;
             transition: transform .15s ease, border-color .15s ease, background .15s ease;
         }
 
-        .toc a:hover {
+        .toc button:hover {
             transform: translateY(-2px);
             border-color: rgba(47, 190, 134, .45);
             background: rgba(47, 190, 134, .1);
+        }
+
+        .toc button.active {
+            border-color: rgba(47, 190, 134, .65);
+            background: rgba(47, 190, 134, .16);
+            color: #d9fbec;
+            box-shadow: inset 0 0 0 1px rgba(47, 190, 134, .5);
         }
 
         .ver {
@@ -176,33 +183,18 @@
             unicode-bidi: embed;
         }
 
-        /* ---------- Script cards ---------- */
-        section.script {
+        /* ---------- Timeline (single merged list) ---------- */
+        .entries {
             background: linear-gradient(160deg, rgba(47, 190, 134, .06), rgba(255, 255, 255, .02));
             border: 1px solid rgba(255, 255, 255, .08);
             border-radius: 18px;
-            padding: 24px 26px;
-            margin-bottom: 22px;
+            padding: 8px 26px 18px;
             transition: border-color .15s ease, box-shadow .15s ease;
-            scroll-margin-top: 24px;
         }
 
-        section.script:hover {
+        .entries:hover {
             border-color: rgba(47, 190, 134, .3);
             box-shadow: 0 14px 34px rgba(0, 0, 0, .3);
-        }
-
-        section.script>h2 {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin: 0 0 6px;
-            font-size: 1.15rem;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            direction: ltr;
-            text-align: left;
         }
 
         /* ---------- Entries ---------- */
@@ -210,8 +202,16 @@
             padding: 16px 0 4px;
         }
 
+        .entry.hidden {
+            display: none;
+        }
+
         .entry+.entry {
             border-top: 1px dashed rgba(255, 255, 255, .1);
+        }
+
+        .entry.first-visible {
+            border-top: 0 !important;
         }
 
         .entry-head {
@@ -231,6 +231,28 @@
             color: var(--muted);
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
             font-size: .78rem;
+        }
+
+        /* Per-entry script label — click to filter to that script. */
+        .script-tag {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: .74rem;
+            font-weight: 600;
+            color: var(--text);
+            background: rgba(255, 255, 255, .06);
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 999px;
+            padding: 2px 10px;
+            direction: ltr;
+            unicode-bidi: embed;
+            cursor: pointer;
+            transition: border-color .15s ease, background .15s ease, color .15s ease;
+        }
+
+        .script-tag:hover {
+            border-color: rgba(47, 190, 134, .5);
+            background: rgba(47, 190, 134, .12);
+            color: #d9fbec;
         }
 
         .entry ul {
@@ -280,28 +302,28 @@
         <header class="page">
             <h1><span class="en">📜 Changelog</span><span class="fa">📜 تاریخچه تغییرات</span></h1>
             <p class="subtitle en">Every script in the pool is versioned independently, following
-                <code>SemVer</code>: MAJOR breaking · MINOR feature · PATCH fix.<br>Each script keeps its own history
-                below — newest first.</p>
+                <code>SemVer</code>: MAJOR breaking · MINOR feature · PATCH fix.<br>One merged timeline below — newest
+                first. Tap a script to see just its history; tap it again to show everything.</p>
             <p class="subtitle fa">هر اسکریپت این مجموعه نسخه‌بندی مستقل خودش را دارد، طبق <code>SemVer</code>:
-                MAJOR تغییر ناسازگار · MINOR قابلیت جدید · PATCH رفع اشکال.<br>تاریخچه هر اسکریپت جداگانه در پایین
-                آمده — جدیدترین بالا.</p>
+                MAJOR تغییر ناسازگار · MINOR قابلیت جدید · PATCH رفع اشکال.<br>در پایین یک تایم‌لاین یکپارچه آمده —
+                جدیدترین بالا. روی هر اسکریپت بزنید تا فقط تاریخچهٔ همان را ببینید؛ دوباره بزنید تا همه‌چیز نشان داده
+                شود.</p>
         </header>
 
-        <nav class="toc">
-            <a href="#pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></a>
-            <a href="#plugin-hunter">plugin-hunter.sh <span class="ver">1.5.0</span></a>
-            <a href="#wp-core">wp-core.sh <span class="ver">1.2.0</span></a>
-            <a href="#perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></a>
-            <a href="#fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></a>
-            <a href="#thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></a>
+        <nav class="toc" role="group" aria-label="Filter by script">
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.5.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.2.0</span></button>
+            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></button>
+            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></button>
+            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></button>
         </nav>
 
-        <!-- ============ pro-plugin-manager.sh ============ -->
-        <section class="script" id="pro-plugin-manager">
-            <h2>pro-plugin-manager.sh <span class="ver">1.5.0</span></h2>
+        <div class="entries" id="entries">
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.5.0</span><time datetime="2026-07-12">2026-07-12</time>
+            <!-- ============ pro-plugin-manager.sh ============ -->
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.5.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Added Elementor Manager and updated the menu display.</li>
@@ -311,8 +333,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.4.0</span><time datetime="2026-07-01">2026-07-01</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-07-01">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.4.0</span><time datetime="2026-07-01">2026-07-01</time>
                 </div>
                 <ul class="en">
                     <li>Added generic plugin management: install, update, repair, and rollback.</li>
@@ -326,8 +348,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.3.1</span><time datetime="2026-06-29">2026-06-29</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-29">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.3.1</span><time datetime="2026-06-29">2026-06-29</time>
                 </div>
                 <ul class="en">
                     <li>Fixed formatting of the beta label on the Search &amp; Replace menu option.</li>
@@ -337,8 +359,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.3.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.3.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Refactored Search &amp; Replace: streamlined the MySQL fallback and removed the wp-cli
@@ -351,8 +373,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.2.1</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.2.1</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Standardized the script header with website and contact info, and added a header printing
@@ -363,8 +385,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.2.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Added database credential parsing from <code>wp-config.php</code> and a database Search &amp;
@@ -376,8 +398,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.1.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Refactored the script structure, added feature stubs, and improved webroot resolution.</li>
@@ -387,8 +409,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Initial release: menu-driven WordPress plugin operations.</li>
@@ -397,14 +419,10 @@
                     <li>انتشار اولیه: عملیات منو‌محور روی افزونه‌های وردپرس.</li>
                 </ul>
             </article>
-        </section>
 
-        <!-- ============ plugin-hunter.sh ============ -->
-        <section class="script" id="plugin-hunter">
-            <h2>plugin-hunter.sh <span class="ver">1.5.0</span></h2>
-
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.5.0</span><time datetime="2026-08-01">2026-08-01</time>
+            <!-- ============ plugin-hunter.sh ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-08-01">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.5.0</span><time datetime="2026-08-01">2026-08-01</time>
                 </div>
                 <ul class="en">
                     <li>Reversed both search strategies: all plugins are now disabled first, then re-enabled to pin down the culprit. Linear reports every problematic plugin, so simultaneous breakages are all caught in one run.</li>
@@ -416,8 +434,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.4.0</span><time datetime="2026-07-12">2026-07-12</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.4.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Enhanced the site health check to verify full page rendering and detect critical errors.</li>
@@ -427,8 +445,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.3.0</span><time datetime="2026-07-07">2026-07-07</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-07-07">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.3.0</span><time datetime="2026-07-07">2026-07-07</time>
                 </div>
                 <ul class="en">
                     <li>Resolve the webroot from a domain name.</li>
@@ -438,8 +456,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.2.1</span><time datetime="2026-07-07">2026-07-07</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-07-07">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.2.1</span><time datetime="2026-07-07">2026-07-07</time>
                 </div>
                 <ul class="en">
                     <li>Fixed the automated check and the manual domain prompt.</li>
@@ -449,8 +467,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-06-30">2026-06-30</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-06-30">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.2.0</span><time datetime="2026-06-30">2026-06-30</time>
                 </div>
                 <ul class="en">
                     <li>Added a binary search strategy for faster fault isolation.</li>
@@ -460,8 +478,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-06-30">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
                 </div>
                 <ul class="en">
                     <li>Added a cancel option and enabled Phase 2.</li>
@@ -471,8 +489,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Standardized the script header with website and contact info, and added a header printing
@@ -483,8 +501,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="plugin-hunter" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Initial release: scan a WordPress install for plugins and log results.</li>
@@ -493,14 +511,10 @@
                     <li>انتشار اولیه: پویش افزونه‌های یک نصب وردپرس و ثبت نتایج در لاگ.</li>
                 </ul>
             </article>
-        </section>
 
-        <!-- ============ wp-core.sh ============ -->
-        <section class="script" id="wp-core">
-            <h2>wp-core.sh <span class="ver">1.2.0</span></h2>
-
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.2.0</span><time datetime="2026-07-12">2026-07-12</time>
+            <!-- ============ wp-core.sh ============ -->
+            <article class="entry" data-script="wp-core" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.2.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Added new helper functions and improved the header descriptions.</li>
@@ -510,8 +524,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
+            <article class="entry" data-script="wp-core" data-date="2026-06-30">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.1.0</span><time datetime="2026-06-30">2026-06-30</time>
                 </div>
                 <ul class="en">
                     <li>Added a core rollback option and display of the current WordPress version in the menu.</li>
@@ -521,8 +535,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="wp-core" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Standardized the script header with website and contact info, and added a header printing
@@ -533,8 +547,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="wp-core" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Initial release: repair, update, or install WordPress core, or provision a fresh site.</li>
@@ -543,14 +557,10 @@
                     <li>انتشار اولیه: تعمیر، به‌روزرسانی یا نصب هسته وردپرس و راه‌اندازی سایت جدید.</li>
                 </ul>
             </article>
-        </section>
 
-        <!-- ============ perm-patrol.sh ============ -->
-        <section class="script" id="perm-patrol">
-            <h2>perm-patrol.sh <span class="ver">1.1.1</span></h2>
-
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.1.1</span><time datetime="2026-07-12">2026-07-12</time>
+            <!-- ============ perm-patrol.sh ============ -->
+            <article class="entry" data-script="perm-patrol" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.1.1</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Renamed from <code>fix-permissions.sh</code> to <code>perm-patrol.sh</code>.</li>
@@ -560,8 +570,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.1.0</span><time datetime="2026-07-12">2026-07-12</time>
+            <article class="entry" data-script="perm-patrol" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.1.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Added detailed descriptions and new features.</li>
@@ -571,8 +581,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-07-12">2026-07-12</time>
+            <article class="entry" data-script="perm-patrol" data-date="2026-07-12">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.0.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
                 <ul class="en">
                     <li>Initial release (as <code>fix-permissions.sh</code>): reset ownership, fix file modes, and
@@ -583,14 +593,10 @@
                         ایمن‌سازی فایل‌های حساس در هوم کاربر پنل.</li>
                 </ul>
             </article>
-        </section>
 
-        <!-- ============ fix-roundcube.sh ============ -->
-        <section class="script" id="fix-roundcube">
-            <h2>fix-roundcube.sh <span class="ver">1.0.1</span></h2>
-
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+            <!-- ============ fix-roundcube.sh ============ -->
+            <article class="entry" data-script="fix-roundcube" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Standardized the script header with website and contact info, and added a header printing
@@ -601,8 +607,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="fix-roundcube" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Initial release: repair and reconfigure Roundcube webmail.</li>
@@ -611,14 +617,10 @@
                     <li>انتشار اولیه: تعمیر و پیکربندی مجدد وب‌میل Roundcube.</li>
                 </ul>
             </article>
-        </section>
 
-        <!-- ============ thing-to-link.sh ============ -->
-        <section class="script" id="thing-to-link">
-            <h2>thing-to-link.sh <span class="ver">1.0.1</span></h2>
-
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
+            <!-- ============ thing-to-link.sh ============ -->
+            <article class="entry" data-script="thing-to-link" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="thing-to-link">thing-to-link.sh</span><span class="ver">1.0.1</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Standardized the script header with website and contact info, and added a header printing
@@ -629,8 +631,8 @@
                 </ul>
             </article>
 
-            <article class="entry">
-                <div class="entry-head"><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
+            <article class="entry" data-script="thing-to-link" data-date="2026-06-28">
+                <div class="entry-head"><span class="script-tag" data-script="thing-to-link">thing-to-link.sh</span><span class="ver">1.0.0</span><time datetime="2026-06-28">2026-06-28</time>
                 </div>
                 <ul class="en">
                     <li>Initial release: fetch a file or URL into the web root and make it accessible via link.</li>
@@ -639,7 +641,8 @@
                     <li>انتشار اولیه: دریافت فایل یا URL در ریشه وب و در دسترس قرار دادن آن از طریق لینک.</li>
                 </ul>
             </article>
-        </section>
+
+        </div>
 
         <footer>
             <p>Developed &amp; Licensed with 💙 by <a href="https://BobClub.ir" target="_blank"
@@ -648,23 +651,66 @@
     </div>
 
     <script>
-        const buttons = document.querySelectorAll('.lang-switch button');
+        // ---------- Language ----------
+        const langButtons = document.querySelectorAll('.lang-switch button');
 
         function applyLang(lang) {
             const root = document.documentElement;
             root.lang = lang;
             root.dir = lang === 'fa' ? 'rtl' : 'ltr';
             root.dataset.lang = lang;
-            buttons.forEach((b) => b.classList.toggle('active', b.dataset.lang === lang));
+            langButtons.forEach((b) => b.classList.toggle('active', b.dataset.lang === lang));
             try { localStorage.setItem('changelog-lang', lang); } catch (e) { /* private mode */ }
         }
 
-        buttons.forEach((b) => b.addEventListener('click', () => applyLang(b.dataset.lang)));
+        langButtons.forEach((b) => b.addEventListener('click', () => applyLang(b.dataset.lang)));
 
         try {
             const saved = localStorage.getItem('changelog-lang');
             if (saved === 'fa') applyLang('fa');
         } catch (e) { /* private mode */ }
+
+        // ---------- Timeline: merge into one list, filter by script ----------
+        const entriesEl = document.getElementById('entries');
+        const filterButtons = document.querySelectorAll('.toc button[data-script]');
+
+        // Merge every script into a single timeline, newest first. Array.sort is
+        // stable, so entries sharing a date keep their authored order.
+        const entries = Array.from(entriesEl.querySelectorAll('.entry')).sort((a, b) =>
+            a.dataset.date < b.dataset.date ? 1 : a.dataset.date > b.dataset.date ? -1 : 0
+        );
+        entries.forEach((el) => entriesEl.appendChild(el));
+
+        let activeScript = null;
+
+        function applyFilter() {
+            let firstVisible = null;
+            entries.forEach((el) => {
+                const show = !activeScript || el.dataset.script === activeScript;
+                el.classList.toggle('hidden', !show);
+                if (show && !firstVisible) firstVisible = el;
+            });
+            // Drop the dashed divider above whichever entry is shown first.
+            entries.forEach((el) => el.classList.toggle('first-visible', el === firstVisible));
+            filterButtons.forEach((b) =>
+                b.classList.toggle('active', b.dataset.script === activeScript)
+            );
+        }
+
+        // Clicking a script toggles its filter: same script again clears it.
+        function toggleScript(script) {
+            activeScript = activeScript === script ? null : script;
+            applyFilter();
+        }
+
+        filterButtons.forEach((b) =>
+            b.addEventListener('click', () => toggleScript(b.dataset.script))
+        );
+        entriesEl.querySelectorAll('.script-tag[data-script]').forEach((tag) =>
+            tag.addEventListener('click', () => toggleScript(tag.dataset.script))
+        );
+
+        applyFilter();
     </script>
 </body>
 
