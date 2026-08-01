@@ -289,7 +289,7 @@
 
         <nav class="toc">
             <a href="#pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></a>
-            <a href="#plugin-hunter">plugin-hunter.sh <span class="ver">1.4.0</span></a>
+            <a href="#plugin-hunter">plugin-hunter.sh <span class="ver">1.5.0</span></a>
             <a href="#wp-core">wp-core.sh <span class="ver">1.2.0</span></a>
             <a href="#perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></a>
             <a href="#fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></a>
@@ -401,7 +401,20 @@
 
         <!-- ============ plugin-hunter.sh ============ -->
         <section class="script" id="plugin-hunter">
-            <h2>plugin-hunter.sh <span class="ver">1.4.0</span></h2>
+            <h2>plugin-hunter.sh <span class="ver">1.5.0</span></h2>
+
+            <article class="entry">
+                <div class="entry-head"><span class="ver">1.5.0</span><time datetime="2026-08-01">2026-08-01</time>
+                </div>
+                <ul class="en">
+                    <li>Reversed both search strategies: all plugins are now disabled first, then re-enabled to pin down the culprit. Linear reports every problematic plugin, so simultaneous breakages are all caught in one run.</li>
+                    <li>Added command-line flags (<code>-d/--domain</code>, <code>-p/--path</code>, <code>-m/--manual</code>, <code>-a/--automate</code>, <code>-l/--linear</code>, <code>-b/--binary</code>, <code>-h/--help</code>) so every prompt can be answered up-front; omitting any still falls back to the interactive prompt.</li>
+                </ul>
+                <ul class="fa">
+                    <li>معکوس‌شدن هر دو استراتژی جست‌وجو: حالا ابتدا همهٔ افزونه‌ها غیرفعال می‌شوند و سپس برای یافتن مقصر دوباره فعال می‌شوند. حالت خطی همهٔ افزونه‌های مشکل‌دار را گزارش می‌کند تا خرابی‌های همزمان همگی در یک اجرا شناسایی شوند.</li>
+                    <li>افزودن پرچم‌های خط فرمان (<code>-d/--domain</code>، <code>-p/--path</code>، <code>-m/--manual</code>، <code>-a/--automate</code>، <code>-l/--linear</code>، <code>-b/--binary</code>، <code>-h/--help</code>) تا بتوان همهٔ ورودی‌ها را مستقیم داد؛ هر ورودی‌ای که داده نشود، همچنان به‌صورت تعاملی پرسیده می‌شود.</li>
+                </ul>
+            </article>
 
             <article class="entry">
                 <div class="entry-head"><span class="ver">1.4.0</span><time datetime="2026-07-12">2026-07-12</time>

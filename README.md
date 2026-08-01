@@ -151,23 +151,29 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 
 | # | Mode | Meaning |
 | --- | --- | --- |
-| **1** | manual | After each plugin is disabled, the script waits and asks *you*: "is the site fixed now?" **Use this** when the bug is something only a human can see — broken checkout, wrong layout, a page that half-loads. |
-| **2** | automate | The script loads the homepage itself and checks for a healthy response. Faster, hands-off. Use this when the site is fully down (500 / white screen), because that's a failure a script can actually detect. |
+| **1** | manual | The script pauses after each change and asks *you* whether the site is working. **Use this** when the bug is something only a human can see — broken checkout, wrong layout, a page that half-loads. |
+| **2** | automate | The script loads the homepage itself and checks for a healthy, fully-rendered response. Faster, hands-off. Use this when the site is fully down (500 / white screen), because that's a failure a script can actually detect. |
 
-**Second — in what order?**
+**Second — how should it hunt?**
+
+Both strategies start the same way: **every plugin is disabled first**, for a clean, healthy baseline. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too.
 
 | # | Strategy | Meaning |
 | --- | --- | --- |
-| **1** | linear | Tests plugins one at a time, from the top. Simple and predictable; with 40 plugins it can take up to 40 rounds. |
-| **2** | binary | Disables **half** the plugins at once, sees which half is guilty, then halves again. 40 plugins → about 6 rounds instead of 40. **Recommended** — same result, far less waiting. |
+| **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues — so it reports **every** guilty plugin, not just the first. |
+| **2** | binary | Re-enables **half** the plugins at once, sees which half breaks the site, then halves again. 40 plugins → about 6 rounds instead of 40. **Recommended** when a single plugin is to blame. |
 
 Everything it does is logged to `/var/log/plugin-hunter.log`.
 
 ```bash
 sudo ./plugin-hunter.sh
-# or point it straight at a path:
+# point it straight at a path:
 sudo ./plugin-hunter.sh /home/user/domains/site.ir/public_html
+# or answer every prompt up-front with flags:
+sudo ./plugin-hunter.sh -d site.ir --automate --binary
 ```
+
+Any flag you leave out is simply asked for interactively. Run `./plugin-hunter.sh --help` for the full list.
 
 ---
 

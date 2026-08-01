@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.4.0
+#   Version   : 1.5.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.4.0"
+VERSION="1.5.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -30,6 +30,60 @@ info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; log "[INFO] $*"; }
 success(){ echo -e "${GREEN}[OK]${RESET} $*"; log "[OK] $*"; }
 error(){ echo -e "${RED}[ERROR]${RESET} $*"; log "[ERROR] $*"; }
 testmsg(){ echo -e "${BLUE}[TEST]${RESET} $*"; log "[TEST] $*"; }
+
+# ---------- Usage ----------
+usage() {
+    cat <<EOF
+Usage: plugin-hunter.sh [options] [path]
+
+Scan a WordPress install to find the plugin(s) that break the site.
+Every option is optional; anything you omit is asked for interactively,
+so the script stays fully usable with no arguments at all.
+
+Options:
+  -d, --domain <domain>   Domain used to resolve the webroot and, in automate
+                          mode, to build the health-check URL.
+  -p, --path <path>       Explicit path to the WordPress install (skips domain
+                          lookup). A bare positional path works too.
+  -m, --manual            Manual mode  — you verify the site by hand.
+  -a, --automate          Automate mode — HTTP health check does the verifying.
+  -l, --linear            Linear strategy — disable all, enable one-by-one.
+  -b, --binary            Binary strategy — disable all, bisect by enabling.
+  -h, --help              Show this help and exit.
+
+Examples:
+  plugin-hunter.sh
+  plugin-hunter.sh -d bob.ir --automate --binary
+  plugin-hunter.sh -p /home/u/public_html --manual --linear
+EOF
+}
+
+# ---------- Parse Arguments ----------
+# Flags let every prompt be answered up-front for non-interactive runs; any
+# value left unset simply falls back to its interactive prompt further down.
+DOMAIN=""
+WP_DIR=""
+MODE=""
+STRATEGY=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--domain)
+            [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
+            DOMAIN="$2"; shift 2 ;;
+        -p|--path)
+            [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
+            WP_DIR="$2"; shift 2 ;;
+        -m|--manual)   MODE="manual"; shift ;;
+        -a|--automate) MODE="automate"; shift ;;
+        -l|--linear)   STRATEGY="linear"; shift ;;
+        -b|--binary)   STRATEGY="binary"; shift ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            error "Unknown option: $1"; usage; exit 1 ;;
+        *)             WP_DIR="$1"; shift ;;   # bare positional path
+    esac
+done
 
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -57,7 +111,9 @@ print_header
 # check below, so it is never asked for twice.
 resolve_webroot() {
     local USER U MAINDOMAIN CONF CONF_DOMAIN DOCROOT
-    read -r -p "Enter domain (or press Enter to use the current directory): " DOMAIN
+    if [ -z "$DOMAIN" ]; then
+        read -r -p "Enter domain (or press Enter to use the current directory): " DOMAIN
+    fi
 
     if [ -z "$DOMAIN" ]; then
         WP_DIR="$(pwd -P)"
@@ -115,10 +171,9 @@ resolve_webroot() {
 }
 
 # ---------- WP Path ----------
-WP_DIR=""
-if [ -n "$1" ]; then
-    WP_DIR="$1"
-else
+# A path from -p / positional wins outright; otherwise resolve from the domain
+# (which resolve_webroot prompts for only when -d was not supplied).
+if [ -z "$WP_DIR" ]; then
     resolve_webroot || exit 1
 fi
 
@@ -128,35 +183,43 @@ PLUGINS_OFF="$WP_DIR/wp-content/plugins.off"
 info "Target WordPress path: $WP_DIR"
 
 # ---------- Mode Selection ----------
-echo -e "${CYAN}Select mode:${RESET}"
-echo "1) manual"
-echo "2) automate"
-read -r -p "Enter choice (1 or 2): " MODE_CHOICE
+# Skip the prompt when -m/-a already set the mode.
+if [ -z "$MODE" ]; then
+    echo -e "${CYAN}Select mode:${RESET}"
+    echo "1) manual"
+    echo "2) automate"
+    read -r -p "Enter choice (1 or 2): " MODE_CHOICE
 
-if [[ "$MODE_CHOICE" == "1" ]]; then
-    MODE="manual"
-elif [[ "$MODE_CHOICE" == "2" ]]; then
-    MODE="automate"
-else
-    error "Invalid mode selection."
-    exit 1
+    if [[ "$MODE_CHOICE" == "1" ]]; then
+        MODE="manual"
+    elif [[ "$MODE_CHOICE" == "2" ]]; then
+        MODE="automate"
+    else
+        error "Invalid mode selection."
+        exit 1
+    fi
 fi
 
 info "Mode selected: $MODE"
 
 # ---------- Strategy Selection ----------
-echo -e "${CYAN}Select search strategy:${RESET}"
-echo "1) linear  (test plugins one-by-one — Phase 1, then Phase 2)"
-echo "2) binary  (bisection — disables half at a time, much faster)"
-read -r -p "Enter choice (1 or 2): " STRATEGY_CHOICE
+# Both strategies start from the same baseline: every plugin disabled, a healthy
+# site. They differ only in how they re-enable plugins to pin down the culprit.
+# Skip the prompt when -l/-b already set the strategy.
+if [ -z "$STRATEGY" ]; then
+    echo -e "${CYAN}Select search strategy:${RESET}"
+    echo "1) linear  (disable all, then enable one-by-one — finds every culprit)"
+    echo "2) binary  (disable all, then bisect by enabling — faster, one culprit)"
+    read -r -p "Enter choice (1 or 2): " STRATEGY_CHOICE
 
-if [[ "$STRATEGY_CHOICE" == "1" ]]; then
-    STRATEGY="linear"
-elif [[ "$STRATEGY_CHOICE" == "2" ]]; then
-    STRATEGY="binary"
-else
-    error "Invalid strategy selection."
-    exit 1
+    if [[ "$STRATEGY_CHOICE" == "1" ]]; then
+        STRATEGY="linear"
+    elif [[ "$STRATEGY_CHOICE" == "2" ]]; then
+        STRATEGY="binary"
+    else
+        error "Invalid strategy selection."
+        exit 1
+    fi
 fi
 
 info "Strategy selected: $STRATEGY"
@@ -249,7 +312,7 @@ check_site() {
 
 # ---------- Confirm Problematic Plugin ----------
 confirm_problem() {
-    read -r -p "Plugin \"$1\" seems to fix the issue. Mark it as problematic and keep it disabled? [y/N, c=cancel]: " CHOICE
+    read -r -p "Plugin \"$1\" appears to be the culprit. Keep it disabled? [y/N, c=cancel]: " CHOICE
     [[ "$CHOICE" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$CHOICE" =~ ^[Yy]$ ]] && return 0 || return 1
 }
@@ -270,14 +333,91 @@ ask_resolved() {
     fi
 }
 
+# ---------- Disable Every Plugin ----------
+# Both strategies begin from a clean baseline — all plugins off, site healthy —
+# and then re-enable plugins to find what breaks it. This surfaces cases the old
+# "disable one at a time" flow missed, where two or three plugins only break the
+# site when they are active together.
+disable_all() {
+    local NAME
+    for NAME in "${PLUGS[@]}"; do
+        [[ "$NAME" == *.off ]] && continue
+        mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
+    done
+    success "All plugins disabled — starting from a clean baseline."
+}
+
+#############################################
+#             LINEAR SEARCH                 #
+#############################################
+# Disable everything, then re-enable plugins one-by-one. After each is enabled
+# we check the site; if it breaks, that plugin is problematic — it is disabled
+# again and recorded, and the scan moves on. This reports EVERY culprit, not
+# just the first, so independent breakages are all caught in a single run.
+linear_search() {
+    local NAME P RESULT
+    local -a problematic=()
+
+    echo
+    info "Linear search over ${#PLUGS[@]} plugin(s)."
+    info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
+
+    disable_all
+
+    for NAME in "${PLUGS[@]}"; do
+        [[ "$NAME" == *.off ]] && continue
+        P="$PLUGINS/$NAME"
+        [ -d "$P.off" ] || continue
+
+        mv "$P.off" "$P"
+        testmsg "Enabled: $NAME"
+        sleep 2
+
+        if [[ "$MODE" == "manual" ]]; then
+            read -r -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
+            [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
+            if [[ "$MAN" =~ ^[Yy]$ ]]; then
+                error "$NAME is problematic. Disabling again."
+                mv "$P" "$P.off"
+                problematic+=("$NAME")
+            else
+                success "$NAME is OK."
+            fi
+        else
+            RESULT=$(check_site)
+            info "Site status: $RESULT"
+            if [[ "$RESULT" == "FAIL" ]]; then
+                error "$NAME is problematic. Disabling again."
+                mv "$P" "$P.off"
+                problematic+=("$NAME")
+            else
+                success "$NAME is OK."
+            fi
+        fi
+    done
+
+    echo
+    if [ "${#problematic[@]}" -eq 0 ]; then
+        success "Scan complete. No problematic plugin found — all re-enabled."
+    else
+        success "Scan complete. ${#problematic[@]} problematic plugin(s) left disabled:"
+        for NAME in "${problematic[@]}"; do
+            info "  - $NAME  (at $PLUGINS/$NAME.off)"
+        done
+    fi
+    info "Log file: $LOG_FILE"
+    exit 0
+}
+
 #############################################
 #             BINARY SEARCH                 #
 #############################################
-# Assumes a single problematic plugin. Each round disables half of the
-# remaining candidates and checks whether the issue is resolved:
-#   - resolved  -> culprit is in the disabled half  (narrow to that half)
-#   - unresolved-> culprit is in the still-active half (narrow to it)
-# Odd counts are fine: the split uses floor(n/2), so a group never empties.
+# Disable everything, then bisect by ENABLING. Each round enables one half of
+# the candidates while the rest stay disabled, and checks the site:
+#   - site OK   -> the culprit is still disabled (in the other half) -> narrow to it
+#   - site FAIL -> the culprit is in the half we just enabled        -> narrow to it
+# Assumes a single problematic plugin. Odd counts are fine: the split uses
+# floor(n/2), so a group never empties.
 binary_search() {
     local -a candidates=()
     local NAME
@@ -287,8 +427,10 @@ binary_search() {
     done
 
     echo
-    info "Binary search over ${#candidates[@]} plugin(s)..."
+    info "Binary search over ${#candidates[@]} plugin(s)."
     info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
+
+    disable_all
 
     while [ "${#candidates[@]}" -gt 1 ]; do
         local n=${#candidates[@]}
@@ -296,25 +438,25 @@ binary_search() {
         local -a groupA=("${candidates[@]:0:half}")
         local -a groupB=("${candidates[@]:half}")
 
-        # Disable group A, keep group B (and everything else) active.
-        for NAME in "${groupA[@]}"; do
-            mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
-        done
-        testmsg "Disabled ${#groupA[@]} of $n candidates; ${#groupB[@]} still active. Test the site."
-
-        ask_resolved
-
-        # Re-enable group A regardless; we only narrow the candidate set.
+        # Enable group A; everything else (incl. group B) stays disabled.
         for NAME in "${groupA[@]}"; do
             [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
         done
+        testmsg "Enabled ${#groupA[@]} of $n candidates; ${#groupB[@]} still disabled. Test the site."
+
+        ask_resolved
+
+        # Disable group A again, back to the all-off baseline for the next round.
+        for NAME in "${groupA[@]}"; do
+            [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+        done
 
         if [[ "$RESOLVED" == "yes" ]]; then
-            info "Culprit is among the ${#groupA[@]} disabled plugin(s)."
-            candidates=("${groupA[@]}")
-        else
-            info "Culprit is among the ${#groupB[@]} active plugin(s)."
+            info "Site stayed healthy — culprit is among the ${#groupB[@]} still-disabled plugin(s)."
             candidates=("${groupB[@]}")
+        else
+            info "Site broke — culprit is among the ${#groupA[@]} enabled plugin(s)."
+            candidates=("${groupA[@]}")
         fi
     done
 
@@ -323,137 +465,34 @@ binary_search() {
 
     echo
     info "Binary search narrowed down to: $CULPRIT"
-    mv "$P" "$P.off" || { error "Failed to disable $CULPRIT"; exit 1; }
-    testmsg "Disabled: $CULPRIT — verify the site one last time."
+    [ -d "$P.off" ] && mv "$P.off" "$P"
+    testmsg "Enabled only: $CULPRIT — verify the site one last time."
 
     ask_resolved
-    if [[ "$RESOLVED" == "yes" ]]; then
+    if [[ "$RESOLVED" == "no" ]]; then
+        # Enabling the culprit alone broke the site — confirmed.
         if confirm_problem "$CULPRIT"; then
+            info "Re-enabling all other plugins..."
+            restore_all
+            mv "$P" "$P.off"
             success "Problematic plugin found: $CULPRIT"
             info "Left disabled at: $P.off"
+            info "Log file: $LOG_FILE"
             exit 0
         fi
     else
-        error "Disabling $CULPRIT did not resolve the issue."
+        error "Enabling $CULPRIT alone did not reproduce the issue."
         info "The problem may involve multiple plugins; try linear mode."
     fi
 
-    mv "$P.off" "$P"
-    info "Restored: $CULPRIT"
+    info "Re-enabling all plugins..."
+    restore_all
+    info "Log file: $LOG_FILE"
     exit 0
 }
 
 if [[ "$STRATEGY" == "binary" ]]; then
     binary_search
-fi
-
-#############################################
-#                PHASE 1                   #
-#############################################
-
-echo
-info "Phase 1 - Testing plugins individually..."
-info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
-
-for NAME in "${PLUGS[@]}"; do
-    [[ "$NAME" == *.off ]] && continue
-
-    P="$PLUGINS/$NAME"
-
-    mv "$P" "$P.off" || { error "Failed to disable $NAME"; continue; }
-    testmsg "Disabled: $NAME"
-
-    if [[ "$MODE" == "manual" ]]; then
-        read -r -p "Check your site manually. Is the issue resolved? [y/N, c=cancel]: " MAN
-        [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
-        if [[ "$MAN" =~ ^[Yy]$ ]]; then
-            if confirm_problem "$NAME"; then
-                success "Problematic plugin found: $NAME"
-                info "Left disabled at: $P.off"
-                exit 0
-            else
-                mv "$P.off" "$P"
-                info "Restored: $NAME"
-            fi
-            continue
-        fi
-    else
-        RESULT=$(check_site)
-        info "Site status: $RESULT"
-
-        if [[ "$RESULT" == "OK" ]]; then
-            if confirm_problem "$NAME"; then
-                success "Problematic plugin found: $NAME"
-                info "Left disabled at: $P.off"
-                exit 0
-            else
-                mv "$P.off" "$P"
-                info "Restored: $NAME"
-            fi
-            continue
-        fi
-    fi
-
-    mv "$P.off" "$P"
-    info "Restored: $NAME"
-done
-
-#############################################
-#                PHASE 2                   #
-#############################################
-
-echo
-info "Phase 1 did not find a problem. Starting Phase 2..."
-info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
-
-read -r -p "Proceed with Phase 2 (disable all, enable one-by-one)? [Y/n, c=cancel]: " P2
-[[ "$P2" =~ ^[Cc]$ ]] && cancel_scan
-if [[ "$P2" =~ ^[Nn]$ ]]; then
-    info "Phase 2 skipped by user."
 else
-    # Disable ALL
-    for NAME in "${PLUGS[@]}"; do
-        [[ "$NAME" == *.off ]] && continue
-        mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off" || error "Failed to disable $NAME"
-    done
-    success "All plugins disabled."
-
-    # Enable one-by-one
-    for NAME in "${PLUGS[@]}"; do
-        P="$PLUGINS/$NAME"
-
-        if [ -d "$P.off" ]; then
-            mv "$P.off" "$P"
-            testmsg "Testing plugin: $NAME"
-            sleep 2
-        fi
-
-        if [[ "$MODE" == "manual" ]]; then
-            read -r -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
-            [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
-            if [[ "$MAN" =~ ^[Yy]$ ]]; then
-                error "$NAME is problematic. Disabling again."
-                mv "$P" "$P.off"
-            else
-                success "$NAME is OK."
-            fi
-        else
-            RESULT=$(check_site)
-            info "Site status: $RESULT"
-
-            if [[ "$RESULT" == "FAIL" ]]; then
-                error "$NAME is problematic. Disabling again."
-                mv "$P" "$P.off"
-            else
-                success "$NAME is OK."
-            fi
-        fi
-    done
+    linear_search
 fi
-
-echo
-success "Scan complete."
-info "Problematic plugins remain disabled (*.off)."
-info "Log file: $LOG_FILE"
-echo
-#############################################
