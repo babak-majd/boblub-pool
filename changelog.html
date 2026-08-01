@@ -183,8 +183,15 @@
             unicode-bidi: embed;
         }
 
-        /* ---------- Timeline (single merged list) ---------- */
+        /* ---------- Timeline (stack of cards) ---------- */
         .entries {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        /* One box per update — or per run of consecutive same-script updates. */
+        .card {
             background: linear-gradient(160deg, rgba(47, 190, 134, .06), rgba(255, 255, 255, .02));
             border: 1px solid rgba(255, 255, 255, .08);
             border-radius: 18px;
@@ -192,7 +199,7 @@
             transition: border-color .15s ease, box-shadow .15s ease;
         }
 
-        .entries:hover {
+        .card:hover {
             border-color: rgba(47, 190, 134, .3);
             box-shadow: 0 14px 34px rgba(0, 0, 0, .3);
         }
@@ -202,16 +209,8 @@
             padding: 16px 0 4px;
         }
 
-        .entry.hidden {
-            display: none;
-        }
-
         .entry+.entry {
             border-top: 1px dashed rgba(255, 255, 255, .1);
-        }
-
-        .entry.first-visible {
-            border-top: 0 !important;
         }
 
         .entry-head {
@@ -670,28 +669,34 @@
             if (saved === 'fa') applyLang('fa');
         } catch (e) { /* private mode */ }
 
-        // ---------- Timeline: merge into one list, filter by script ----------
-        const entriesEl = document.getElementById('entries');
+        // ---------- Timeline: merge, group into boxes, filter by script ----------
+        const timeline = document.getElementById('entries');
         const filterButtons = document.querySelectorAll('.toc button[data-script]');
 
-        // Merge every script into a single timeline, newest first. Array.sort is
-        // stable, so entries sharing a date keep their authored order.
-        const entries = Array.from(entriesEl.querySelectorAll('.entry')).sort((a, b) =>
+        // Grab every entry once, ordered newest first. Array.sort is stable, so
+        // entries sharing a date keep their authored order.
+        const allEntries = Array.from(timeline.querySelectorAll('.entry')).sort((a, b) =>
             a.dataset.date < b.dataset.date ? 1 : a.dataset.date > b.dataset.date ? -1 : 0
         );
-        entries.forEach((el) => entriesEl.appendChild(el));
 
         let activeScript = null;
 
-        function applyFilter() {
-            let firstVisible = null;
-            entries.forEach((el) => {
-                const show = !activeScript || el.dataset.script === activeScript;
-                el.classList.toggle('hidden', !show);
-                if (show && !firstVisible) firstVisible = el;
+        function render() {
+            // Rebuild the stack. Every visible update gets its own box, except
+            // consecutive updates of the same script, which share one box.
+            timeline.textContent = '';
+            let card = null;
+            let prevScript = null;
+            allEntries.forEach((el) => {
+                if (activeScript && el.dataset.script !== activeScript) return;
+                if (!card || el.dataset.script !== prevScript) {
+                    card = document.createElement('div');
+                    card.className = 'card';
+                    timeline.appendChild(card);
+                }
+                card.appendChild(el);
+                prevScript = el.dataset.script;
             });
-            // Drop the dashed divider above whichever entry is shown first.
-            entries.forEach((el) => el.classList.toggle('first-visible', el === firstVisible));
             filterButtons.forEach((b) =>
                 b.classList.toggle('active', b.dataset.script === activeScript)
             );
@@ -700,17 +705,19 @@
         // Clicking a script toggles its filter: same script again clears it.
         function toggleScript(script) {
             activeScript = activeScript === script ? null : script;
-            applyFilter();
+            render();
         }
 
         filterButtons.forEach((b) =>
             b.addEventListener('click', () => toggleScript(b.dataset.script))
         );
-        entriesEl.querySelectorAll('.script-tag[data-script]').forEach((tag) =>
-            tag.addEventListener('click', () => toggleScript(tag.dataset.script))
-        );
+        // Entry nodes persist across re-render, so attach tag listeners once.
+        allEntries.forEach((el) => {
+            const tag = el.querySelector('.script-tag[data-script]');
+            if (tag) tag.addEventListener('click', () => toggleScript(tag.dataset.script));
+        });
 
-        applyFilter();
+        render();
     </script>
 </body>
 
