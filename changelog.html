@@ -311,7 +311,7 @@
 
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.5.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.6.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.2.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></button>
@@ -420,6 +420,19 @@
             </article>
 
             <!-- ============ plugin-hunter.sh ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-08-05">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.6.0</span><time datetime="2026-08-05">2026-08-05</time>
+                </div>
+                <ul class="en">
+                    <li>Binary search now verifies the site is healthy with every plugin disabled before starting, and aborts if the fault is not a plugin.</li>
+                    <li>Binary search is now recursive and explores both halves, so it finds <em>every</em> problematic plugin instead of stopping at the first — clean halves are enabled in one cheap check, broken halves are split further.</li>
+                </ul>
+                <ul class="fa">
+                    <li>جستجوی دودویی حالا پیش از شروع، سالم بودن سایت را با غیرفعال بودن همهٔ افزونه‌ها بررسی می‌کند و اگر مشکل از افزونه نباشد متوقف می‌شود.</li>
+                    <li>جستجوی دودویی حالا بازگشتی است و هر دو نیمه را بررسی می‌کند، پس به‌جای توقف روی اولین مورد، <em>همهٔ</em> افزونه‌های مشکل‌دار را پیدا می‌کند — نیمه‌های سالم با یک بررسی ارزان فعال می‌شوند و نیمه‌های خراب باز هم نصف می‌شوند.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="plugin-hunter" data-date="2026-08-01">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.5.0</span><time datetime="2026-08-01">2026-08-01</time>
                 </div>

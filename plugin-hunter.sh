@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.5.0
+#   Version   : 1.6.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -310,13 +310,6 @@ check_site() {
     fi
 }
 
-# ---------- Confirm Problematic Plugin ----------
-confirm_problem() {
-    read -r -p "Plugin \"$1\" appears to be the culprit. Keep it disabled? [y/N, c=cancel]: " CHOICE
-    [[ "$CHOICE" =~ ^[Cc]$ ]] && cancel_scan
-    [[ "$CHOICE" =~ ^[Yy]$ ]] && return 0 || return 1
-}
-
 # ---------- Resolved Check (sets RESOLVED to yes/no) ----------
 # Manual mode asks the user; automate mode probes the site's front page.
 ask_resolved() {
@@ -347,6 +340,24 @@ disable_all() {
     success "All plugins disabled — starting from a clean baseline."
 }
 
+# ---------- Verify Baseline ----------
+# With every plugin disabled the site MUST be healthy. If it is still broken,
+# the fault is not a plugin (theme, server, database, core...) and there is
+# nothing to hunt — restore everything and bail out instead of chasing a ghost.
+verify_baseline() {
+    testmsg "All plugins disabled — check the site now: is it healthy?"
+    ask_resolved
+    if [[ "$RESOLVED" != "yes" ]]; then
+        echo
+        error "Site is still broken with every plugin disabled — the cause is not a plugin."
+        info "Restoring all plugins..."
+        restore_all
+        info "Log file: $LOG_FILE"
+        exit 1
+    fi
+    success "Baseline healthy — beginning the hunt."
+}
+
 #############################################
 #             LINEAR SEARCH                 #
 #############################################
@@ -363,6 +374,7 @@ linear_search() {
     info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
 
     disable_all
+    verify_baseline
 
     for NAME in "${PLUGS[@]}"; do
         [[ "$NAME" == *.off ]] && continue
@@ -412,15 +424,74 @@ linear_search() {
 #############################################
 #             BINARY SEARCH                 #
 #############################################
-# Disable everything, then bisect by ENABLING. Each round enables one half of
-# the candidates while the rest stay disabled, and checks the site:
-#   - site OK   -> the culprit is still disabled (in the other half) -> narrow to it
-#   - site FAIL -> the culprit is in the half we just enabled        -> narrow to it
-# Assumes a single problematic plugin. Odd counts are fine: the split uses
-# floor(n/2), so a group never empties.
+# Disable everything, then bisect by ENABLING — and, unlike a single-culprit
+# search, always explore BOTH halves so every problematic plugin is found:
+#
+#   bisect(group):                       # group starts fully disabled, site OK
+#     enable the whole group, test the site
+#       healthy -> the group is clean; leave it enabled and return
+#       broken  -> a culprit is inside; disable the group again, split in two,
+#                  and bisect each half. The second half is never dropped, so
+#                  culprits hiding there are found too.
+#     a group of one that breaks the site is itself a culprit: keep it disabled.
+#
+# Whenever a half is cleared the search moves on to the other half, but it never
+# forgets that other half — the goal is to surface ALL culprits, not just one.
+# Odd counts are fine: the split uses floor(n/2), so a group never empties.
+
+CULPRITS=()
+
+# bisect NAME...
+# Precondition: every plugin in the list is disabled and the site is healthy.
+# On return the group's safe plugins are enabled, its culprits are disabled and
+# appended to CULPRITS, and the site is healthy again.
+bisect() {
+    local -a group=("$@")
+    local n=${#group[@]} NAME half
+
+    (( n == 0 )) && return
+
+    if (( n == 1 )); then
+        NAME="${group[0]}"
+        [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+        testmsg "Enabled: $NAME — test the site."
+        ask_resolved
+        if [[ "$RESOLVED" == "yes" ]]; then
+            success "$NAME is OK."
+        else
+            error "$NAME is problematic. Disabling again."
+            mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+            CULPRITS+=("$NAME")
+        fi
+        return
+    fi
+
+    # Enable the whole group at once; a healthy site clears all of them cheaply.
+    for NAME in "${group[@]}"; do
+        [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+    done
+    testmsg "Enabled $n plugin(s) at once — test the site."
+    ask_resolved
+    if [[ "$RESOLVED" == "yes" ]]; then
+        success "All $n plugin(s) in this group are OK."
+        return
+    fi
+
+    # A culprit is inside this group. Disable it again, then dig into both halves.
+    info "Breakage is inside this group of $n — narrowing into both halves..."
+    for NAME in "${group[@]}"; do
+        [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+    done
+
+    half=$(( n / 2 ))
+    bisect "${group[@]:0:half}"
+    bisect "${group[@]:half}"
+}
+
 binary_search() {
     local -a candidates=()
-    local NAME
+    local NAME n half
+
     for NAME in "${PLUGS[@]}"; do
         [[ "$NAME" == *.off ]] && continue
         candidates+=("$NAME")
@@ -431,62 +502,25 @@ binary_search() {
     info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
 
     disable_all
+    verify_baseline
 
-    while [ "${#candidates[@]}" -gt 1 ]; do
-        local n=${#candidates[@]}
-        local half=$(( n / 2 ))
-        local -a groupA=("${candidates[@]:0:half}")
-        local -a groupB=("${candidates[@]:half}")
-
-        # Enable group A; everything else (incl. group B) stays disabled.
-        for NAME in "${groupA[@]}"; do
-            [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
-        done
-        testmsg "Enabled ${#groupA[@]} of $n candidates; ${#groupB[@]} still disabled. Test the site."
-
-        ask_resolved
-
-        # Disable group A again, back to the all-off baseline for the next round.
-        for NAME in "${groupA[@]}"; do
-            [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
-        done
-
-        if [[ "$RESOLVED" == "yes" ]]; then
-            info "Site stayed healthy — culprit is among the ${#groupB[@]} still-disabled plugin(s)."
-            candidates=("${groupB[@]}")
-        else
-            info "Site broke — culprit is among the ${#groupA[@]} enabled plugin(s)."
-            candidates=("${groupA[@]}")
-        fi
-    done
-
-    local CULPRIT="${candidates[0]}"
-    local P="$PLUGINS/$CULPRIT"
+    CULPRITS=()
+    n=${#candidates[@]}
+    half=$(( n / 2 ))
+    # Split at the top: re-enabling the whole (already-broken) set proves nothing,
+    # so we start one level down and let bisect explore each half.
+    bisect "${candidates[@]:0:half}"
+    bisect "${candidates[@]:half}"
 
     echo
-    info "Binary search narrowed down to: $CULPRIT"
-    [ -d "$P.off" ] && mv "$P.off" "$P"
-    testmsg "Enabled only: $CULPRIT — verify the site one last time."
-
-    ask_resolved
-    if [[ "$RESOLVED" == "no" ]]; then
-        # Enabling the culprit alone broke the site — confirmed.
-        if confirm_problem "$CULPRIT"; then
-            info "Re-enabling all other plugins..."
-            restore_all
-            mv "$P" "$P.off"
-            success "Problematic plugin found: $CULPRIT"
-            info "Left disabled at: $P.off"
-            info "Log file: $LOG_FILE"
-            exit 0
-        fi
+    if [ "${#CULPRITS[@]}" -eq 0 ]; then
+        success "Scan complete. No problematic plugin found — all re-enabled."
     else
-        error "Enabling $CULPRIT alone did not reproduce the issue."
-        info "The problem may involve multiple plugins; try linear mode."
+        success "Scan complete. ${#CULPRITS[@]} problematic plugin(s) left disabled:"
+        for NAME in "${CULPRITS[@]}"; do
+            info "  - $NAME  (at $PLUGINS/$NAME.off)"
+        done
     fi
-
-    info "Re-enabling all plugins..."
-    restore_all
     info "Log file: $LOG_FILE"
     exit 0
 }

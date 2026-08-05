@@ -156,12 +156,12 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 
 **Second — how should it hunt?**
 
-Both strategies start the same way: **every plugin is disabled first**, for a clean, healthy baseline. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too.
+Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. (If it's still broken with nothing enabled, the fault isn't a plugin — the scan says so and stops.) They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first.
 
 | # | Strategy | Meaning |
 | --- | --- | --- |
-| **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues — so it reports **every** guilty plugin, not just the first. |
-| **2** | binary | Re-enables **half** the plugins at once, sees which half breaks the site, then halves again. 40 plugins → about 6 rounds instead of 40. **Recommended** when a single plugin is to blame. |
+| **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues. Simple and predictable. |
+| **2** | binary | Re-enables plugins **half at a time**: a healthy half is cleared in a single check, a broken half is split and searched again — recursively, through *both* halves. Same complete result as linear, with far fewer checks. **Recommended.** |
 
 Everything it does is logged to `/var/log/plugin-hunter.log`.
 
