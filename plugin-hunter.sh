@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.6.0
+#   Version   : 1.7.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.6.0"
+VERSION="1.7.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -340,22 +340,62 @@ disable_all() {
     success "All plugins disabled — starting from a clean baseline."
 }
 
+# ---------- Culprit / Pinned Bookkeeping ----------
+CULPRITS=()      # plugins confirmed to break the site; left disabled
+PINNED=()        # plugins force-enabled as dependencies (e.g. WooCommerce)
+
+is_culprit() { local x; for x in "${CULPRITS[@]}"; do [[ "$x" == "$1" ]] && return 0; done; return 1; }
+is_pinned()  { local x; for x in "${PINNED[@]}";   do [[ "$x" == "$1" ]] && return 0; done; return 1; }
+
+# Announce a pinned-down culprit and, in manual mode, let the operator decide
+# whether it really stays disabled. Automate mode is hands-off, so it keeps it.
+# Returns 0 to keep disabled, 1 to put it back.
+keep_disabled() {
+    local NAME="$1" ANS
+    error "Identified and disabled: $NAME"
+    [[ "$MODE" == "automate" ]] && return 0
+    read -r -p "Keep \"$NAME\" disabled? [Y/n, c=cancel]: " ANS
+    [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
+    [[ "$ANS" =~ ^[Nn]$ ]] && return 1
+    return 0
+}
+
 # ---------- Verify Baseline ----------
-# With every plugin disabled the site MUST be healthy. If it is still broken,
-# the fault is not a plugin (theme, server, database, core...) and there is
-# nothing to hunt — restore everything and bail out instead of chasing a ghost.
+# With every plugin disabled the site MUST be healthy. If it is still broken it
+# is usually one of two things:
+#   1. A theme (or must-use code) that fatals when WooCommerce is absent. If
+#      WooCommerce is installed we pin it back on and re-check, so its absence
+#      cannot masquerade as a plugin fault throughout the hunt.
+#   2. A genuinely non-plugin fault (server, database, core, theme) — nothing to
+#      hunt, so restore everything and bail out instead of chasing a ghost.
 verify_baseline() {
     testmsg "All plugins disabled — check the site now: is it healthy?"
     ask_resolved
-    if [[ "$RESOLVED" != "yes" ]]; then
-        echo
-        error "Site is still broken with every plugin disabled — the cause is not a plugin."
-        info "Restoring all plugins..."
-        restore_all
-        info "Log file: $LOG_FILE"
-        exit 1
+    if [[ "$RESOLVED" == "yes" ]]; then
+        success "Baseline healthy — beginning the hunt."
+        return
     fi
-    success "Baseline healthy — beginning the hunt."
+
+    # Common gotcha: a WooCommerce-dependent theme fatals without WooCommerce.
+    if [ -d "$PLUGINS/woocommerce.off" ]; then
+        echo
+        info "Still broken with everything off, but WooCommerce is installed."
+        info "Many themes require it — enabling WooCommerce and re-checking..."
+        mv "$PLUGINS/woocommerce.off" "$PLUGINS/woocommerce" && PINNED+=("woocommerce")
+        ask_resolved
+        if [[ "$RESOLVED" == "yes" ]]; then
+            success "Baseline healthy with WooCommerce pinned on — beginning the hunt."
+            info "WooCommerce stays enabled and is excluded from the hunt."
+            return
+        fi
+    fi
+
+    echo
+    error "Site is still broken with every plugin disabled — the cause is not a plugin."
+    info "Restoring all plugins..."
+    restore_all
+    info "Log file: $LOG_FILE"
+    exit 1
 }
 
 #############################################
@@ -378,6 +418,7 @@ linear_search() {
 
     for NAME in "${PLUGS[@]}"; do
         [[ "$NAME" == *.off ]] && continue
+        is_pinned "$NAME" && continue          # pinned dependency: already enabled
         P="$PLUGINS/$NAME"
         [ -d "$P.off" ] || continue
 
@@ -385,26 +426,27 @@ linear_search() {
         testmsg "Enabled: $NAME"
         sleep 2
 
+        local broke="no"
         if [[ "$MODE" == "manual" ]]; then
             read -r -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
             [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
-            if [[ "$MAN" =~ ^[Yy]$ ]]; then
-                error "$NAME is problematic. Disabling again."
-                mv "$P" "$P.off"
-                problematic+=("$NAME")
-            else
-                success "$NAME is OK."
-            fi
+            [[ "$MAN" =~ ^[Yy]$ ]] && broke="yes"
         else
             RESULT=$(check_site)
             info "Site status: $RESULT"
-            if [[ "$RESULT" == "FAIL" ]]; then
-                error "$NAME is problematic. Disabling again."
-                mv "$P" "$P.off"
+            [[ "$RESULT" == "FAIL" ]] && broke="yes"
+        fi
+
+        if [[ "$broke" == "yes" ]]; then
+            mv "$P" "$P.off"
+            if keep_disabled "$NAME"; then
                 problematic+=("$NAME")
             else
-                success "$NAME is OK."
+                mv "$P.off" "$P"
+                info "Re-enabled $NAME at your request."
             fi
+        else
+            success "$NAME is OK."
         fi
     done
 
@@ -424,73 +466,72 @@ linear_search() {
 #############################################
 #             BINARY SEARCH                 #
 #############################################
-# Disable everything, then bisect by ENABLING — and, unlike a single-culprit
-# search, always explore BOTH halves so every problematic plugin is found:
-#
-#   bisect(group):                       # group starts fully disabled, site OK
-#     enable the whole group, test the site
-#       healthy -> the group is clean; leave it enabled and return
-#       broken  -> a culprit is inside; disable the group again, split in two,
-#                  and bisect each half. The second half is never dropped, so
-#                  culprits hiding there are found too.
-#     a group of one that breaks the site is itself a culprit: keep it disabled.
-#
-# Whenever a half is cleared the search moves on to the other half, but it never
-# forgets that other half — the goal is to surface ALL culprits, not just one.
+# Iterative "peel": re-enable every non-culprit plugin and test the WHOLE site
+# at once. If it is healthy, there is nothing (more) to find — stop. If it is
+# broken, bisect the enabled suspects (disabling halves) to pin down ONE culprit,
+# disable it, and loop. Re-checking the whole site after every find short-circuits
+# the common single-culprit case and confirms the site actually ends up healthy;
+# looping until it does surfaces EVERY culprit, not just the first.
 # Odd counts are fine: the split uses floor(n/2), so a group never empties.
 
-CULPRITS=()
+# isolate_one NAME...
+# Precondition: the named plugins are all DISABLED and the site is healthy, with
+# at least one culprit among them (pinned plugins are never passed in). Bisects
+# by ENABLING halves — building up from the healthy baseline so other culprits
+# stay off and cannot muddy the signal — until one culprit remains. Leaves that
+# one disabled and returns its name in the global ISOLATED (empty if the fault
+# turns out to need a combination of plugins).
+#
+# Building up (rather than tearing down from all-enabled) is what makes this
+# correct when several culprits are present at once: only the half under test is
+# ever live, so a break can only come from a culprit inside it.
+ISOLATED=""
+isolate_one() {
+    local -a cands=("$@") A
+    local n half NAME
 
-# bisect NAME...
-# Precondition: every plugin in the list is disabled and the site is healthy.
-# On return the group's safe plugins are enabled, its culprits are disabled and
-# appended to CULPRITS, and the site is healthy again.
-bisect() {
-    local -a group=("$@")
-    local n=${#group[@]} NAME half
+    while (( ${#cands[@]} > 1 )); do
+        n=${#cands[@]}
+        half=$(( n / 2 ))
+        A=("${cands[@]:0:half}")
 
-    (( n == 0 )) && return
-
-    if (( n == 1 )); then
-        NAME="${group[0]}"
-        [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
-        testmsg "Enabled: $NAME — test the site."
+        # Enable the first half only; the rest stay disabled.
+        for NAME in "${A[@]}"; do
+            [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+        done
+        testmsg "Enabled ${#A[@]} of $n suspects; test the site."
         ask_resolved
-        if [[ "$RESOLVED" == "yes" ]]; then
-            success "$NAME is OK."
+
+        if [[ "$RESOLVED" == "no" ]]; then
+            # A culprit is inside this half. Disable it again and narrow to it.
+            for NAME in "${A[@]}"; do
+                [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+            done
+            info "Breakage is in that half — narrowing to ${#A[@]}."
+            cands=("${A[@]}")
         else
-            error "$NAME is problematic. Disabling again."
-            mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
-            CULPRITS+=("$NAME")
+            # This half is clean; leave it enabled and narrow to the rest.
+            info "That half is clean — narrowing to the other $(( n - ${#A[@]} ))."
+            cands=("${cands[@]:half}")
         fi
-        return
-    fi
-
-    # Enable the whole group at once; a healthy site clears all of them cheaply.
-    for NAME in "${group[@]}"; do
-        [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
     done
-    testmsg "Enabled $n plugin(s) at once — test the site."
+
+    # Confirm the lone suspect really breaks the site on its own.
+    ISOLATED="${cands[0]}"
+    [ -d "$PLUGINS/$ISOLATED.off" ] && mv "$PLUGINS/$ISOLATED.off" "$PLUGINS/$ISOLATED"
+    testmsg "Enabled only $ISOLATED; test the site."
     ask_resolved
-    if [[ "$RESOLVED" == "yes" ]]; then
-        success "All $n plugin(s) in this group are OK."
-        return
+    if [[ "$RESOLVED" == "no" ]]; then
+        mv "$PLUGINS/$ISOLATED" "$PLUGINS/$ISOLATED.off"
+    else
+        info "$ISOLATED alone did not break the site — likely a plugin combination."
+        ISOLATED=""
     fi
-
-    # A culprit is inside this group. Disable it again, then dig into both halves.
-    info "Breakage is inside this group of $n — narrowing into both halves..."
-    for NAME in "${group[@]}"; do
-        [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
-    done
-
-    half=$(( n / 2 ))
-    bisect "${group[@]:0:half}"
-    bisect "${group[@]:half}"
 }
 
 binary_search() {
-    local -a candidates=()
-    local NAME n half
+    local -a candidates=() huntable declined=()
+    local NAME on
 
     for NAME in "${PLUGS[@]}"; do
         [[ "$NAME" == *.off ]] && continue
@@ -505,22 +546,71 @@ binary_search() {
     verify_baseline
 
     CULPRITS=()
-    n=${#candidates[@]}
-    half=$(( n / 2 ))
-    # Split at the top: re-enabling the whole (already-broken) set proves nothing,
-    # so we start one level down and let bisect explore each half.
-    bisect "${candidates[@]:0:half}"
-    bisect "${candidates[@]:half}"
+    while : ; do
+        # Re-enable every non-culprit (pinned ones are already on) and test the
+        # whole site — maybe nothing (more) is wrong and we can stop right here.
+        on=0
+        for NAME in "${candidates[@]}"; do
+            is_culprit "$NAME" && continue
+            [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+            (( on++ ))
+        done
+        testmsg "Enabled all $on non-culprit plugin(s) — test the whole site."
+        ask_resolved
+        [[ "$RESOLVED" == "yes" ]] && break
+
+        # Broken → collect the non-pinned suspects and reset them to the healthy
+        # baseline (all off) so isolate_one can build up cleanly from there.
+        huntable=()
+        for NAME in "${candidates[@]}"; do
+            is_culprit "$NAME" && continue
+            is_pinned "$NAME" && continue
+            huntable+=("$NAME")
+            [ -d "$PLUGINS/$NAME" ] && mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+        done
+        if [ "${#huntable[@]}" -eq 0 ]; then
+            error "Site is broken but no plugins remain to test — a pinned dependency or a non-plugin fault."
+            break
+        fi
+
+        info "Site broken — isolating the next culprit among ${#huntable[@]} suspect(s)..."
+        isolate_one "${huntable[@]}"
+
+        if [ -z "$ISOLATED" ]; then
+            error "Could not pin down a single culprit — the site breaks only on a plugin combination."
+            info "Try linear mode or inspect the remaining plugins by hand."
+            break
+        fi
+
+        if keep_disabled "$ISOLATED"; then
+            CULPRITS+=("$ISOLATED")
+            info "Keeping $ISOLATED disabled."
+        else
+            [ -d "$PLUGINS/$ISOLATED.off" ] && mv "$PLUGINS/$ISOLATED.off" "$PLUGINS/$ISOLATED"
+            info "Re-enabled $ISOLATED at your request — ending the scan."
+            declined+=("$ISOLATED")
+            break
+        fi
+    done
+
+    # However the loop ended, re-enable every plugin that is not a confirmed
+    # culprit so the site is left in a consistent, known state.
+    for NAME in "${candidates[@]}"; do
+        is_culprit "$NAME" && continue
+        [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+    done
 
     echo
     if [ "${#CULPRITS[@]}" -eq 0 ]; then
-        success "Scan complete. No problematic plugin found — all re-enabled."
+        success "Scan complete. No plugin is left disabled."
     else
         success "Scan complete. ${#CULPRITS[@]} problematic plugin(s) left disabled:"
         for NAME in "${CULPRITS[@]}"; do
             info "  - $NAME  (at $PLUGINS/$NAME.off)"
         done
     fi
+    [ "${#declined[@]}" -gt 0 ] && info "Flagged but kept enabled at your request: ${declined[*]}"
+    [ "${#PINNED[@]}" -gt 0 ] && info "Pinned on (kept enabled): ${PINNED[*]}"
     info "Log file: $LOG_FILE"
     exit 0
 }

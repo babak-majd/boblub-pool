@@ -156,12 +156,12 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 
 **Second — how should it hunt?**
 
-Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. (If it's still broken with nothing enabled, the fault isn't a plugin — the scan says so and stops.) They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first.
+Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first, and (in manual mode) asks you to confirm each one before it's left disabled.
 
 | # | Strategy | Meaning |
 | --- | --- | --- |
 | **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues. Simple and predictable. |
-| **2** | binary | Re-enables plugins **half at a time**: a healthy half is cleared in a single check, a broken half is split and searched again — recursively, through *both* halves. Same complete result as linear, with far fewer checks. **Recommended.** |
+| **2** | binary | Isolates a culprit by bisection (~log₂n checks), then re-enables everything and re-tests: healthy → done; still broken → hunt the next one. Same complete result as linear, far fewer checks. **Recommended.** |
 
 Everything it does is logged to `/var/log/plugin-hunter.log`.
 
