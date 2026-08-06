@@ -156,7 +156,7 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 
 **Second — how should it hunt?**
 
-Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first, and (in manual mode) asks you to confirm each one before it's left disabled.
+Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first, and asks you to confirm each one before it's left disabled — pass `--auto-accept` to keep them all without prompting.
 
 | # | Strategy | Meaning |
 | --- | --- | --- |

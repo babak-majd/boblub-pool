@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.7.0
+#   Version   : 1.7.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.7.0"
+VERSION="1.7.1"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -49,6 +49,8 @@ Options:
   -a, --automate          Automate mode — HTTP health check does the verifying.
   -l, --linear            Linear strategy — disable all, enable one-by-one.
   -b, --binary            Binary strategy — disable all, bisect by enabling.
+      --auto-accept       Keep every identified culprit disabled without asking
+                          (otherwise each one is confirmed, even in automate mode).
   -h, --help              Show this help and exit.
 
 Examples:
@@ -65,6 +67,7 @@ DOMAIN=""
 WP_DIR=""
 MODE=""
 STRATEGY=""
+AUTO_ACCEPT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -74,11 +77,12 @@ while [ $# -gt 0 ]; do
         -p|--path)
             [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
             WP_DIR="$2"; shift 2 ;;
-        -m|--manual)   MODE="manual"; shift ;;
-        -a|--automate) MODE="automate"; shift ;;
-        -l|--linear)   STRATEGY="linear"; shift ;;
-        -b|--binary)   STRATEGY="binary"; shift ;;
-        -h|--help)     usage; exit 0 ;;
+        -m|--manual)    MODE="manual"; shift ;;
+        -a|--automate)  MODE="automate"; shift ;;
+        -l|--linear)    STRATEGY="linear"; shift ;;
+        -b|--binary)    STRATEGY="binary"; shift ;;
+        --auto-accept)  AUTO_ACCEPT="yes"; shift ;;
+        -h|--help)      usage; exit 0 ;;
         --)            shift; break ;;
         -*)            error "Unknown option: $1"; usage; exit 1 ;;
         *)             WP_DIR="$1"; shift ;;   # bare positional path
@@ -347,13 +351,13 @@ PINNED=()        # plugins force-enabled as dependencies (e.g. WooCommerce)
 is_culprit() { local x; for x in "${CULPRITS[@]}"; do [[ "$x" == "$1" ]] && return 0; done; return 1; }
 is_pinned()  { local x; for x in "${PINNED[@]}";   do [[ "$x" == "$1" ]] && return 0; done; return 1; }
 
-# Announce a pinned-down culprit and, in manual mode, let the operator decide
-# whether it really stays disabled. Automate mode is hands-off, so it keeps it.
-# Returns 0 to keep disabled, 1 to put it back.
+# Announce a pinned-down culprit and let the operator decide whether it really
+# stays disabled — in both manual and automate mode. Only --auto-accept skips
+# the prompt and keeps it. Returns 0 to keep disabled, 1 to put it back.
 keep_disabled() {
     local NAME="$1" ANS
     error "Identified and disabled: $NAME"
-    [[ "$MODE" == "automate" ]] && return 0
+    [[ "$AUTO_ACCEPT" == "yes" ]] && return 0
     read -r -p "Keep \"$NAME\" disabled? [Y/n, c=cancel]: " ANS
     [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$ANS" =~ ^[Nn]$ ]] && return 1
