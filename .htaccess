@@ -12,4 +12,22 @@ AddDefaultCharset UTF-8
 
     # Internally serve changelog.html for /changelog
     RewriteRule ^changelog/?$ changelog.html [L]
+
+    # Show a script's source in the browser instead of downloading it:
+    # request "<name>.sh.view" to read the real "<name>.sh" as inline text
+    # (e.g. plugin-hunter.sh.view shows the source of plugin-hunter.sh).
+    RewriteRule ^(.+\.sh)\.view$ $1 [L]
+</IfModule>
+
+# Serve the *.sh.view requests above as inline UTF-8 text, not a download.
+# SetEnvIf matches the ORIGINAL request URI; the REDIRECT_ variant covers the
+# case where the rewrite above is applied via an internal sub-request.
+<IfModule mod_setenvif.c>
+    SetEnvIf Request_URI "\.sh\.view$" SHOW_SOURCE=1
+</IfModule>
+<IfModule mod_headers.c>
+    Header set Content-Type "text/plain; charset=utf-8" env=SHOW_SOURCE
+    Header set Content-Disposition "inline"             env=SHOW_SOURCE
+    Header set Content-Type "text/plain; charset=utf-8" env=REDIRECT_SHOW_SOURCE
+    Header set Content-Disposition "inline"             env=REDIRECT_SHOW_SOURCE
 </IfModule>
