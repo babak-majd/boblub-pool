@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.5.0
+#   Version   : 1.6.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 
 #############################################
@@ -37,6 +37,113 @@ DB_HOST=""
 DB_PORT=""
 DB_PREFIX=""
 
+# CLI flags (filled by the argument parser below)
+DOMAIN=""
+WP_PATH=""
+FEATURE=""          # woocommerce | elementor | search | blueguard
+PLUGIN_ACTION=""    # repair | update | install | rollback
+REQ_VERSION=""      # version for --install
+ASSUME_YES=""       # auto-activate after install, auto-confirm rollback
+NO_ACTIVATE=""      # skip activation without asking
+SR_OLD=""           # search & replace: old value
+SR_NEW=""           # search & replace: new value
+SR_NEW_SET=""       # whether --new was given (an empty new value is valid)
+SR_MODE=""          # search & replace mode: count | apply
+
+
+#############################################
+#  USAGE + ARGUMENT PARSING
+#############################################
+# Flags let every prompt be answered up-front for non-interactive runs; any
+# value left unset simply falls back to its interactive prompt further down.
+usage() {
+    cat <<EOF
+Usage: pro-plugin-manager.sh [options] [path]
+
+Menu-driven WordPress plugin operations: manage WooCommerce or Elementor,
+search & replace across the whole database, or install Blue Guard.
+Every option is optional; anything you omit is asked for interactively,
+so the script stays fully usable with no arguments at all.
+
+Options:
+  -d, --domain <domain>   Domain used to resolve the webroot (cPanel/DirectAdmin).
+  -p, --path <path>       Explicit path to the webroot (skips domain lookup).
+                          A bare positional path works too.
+
+  Feature (which menu item to run):
+  -w, --woocommerce       Manage the WooCommerce plugin.
+  -e, --elementor         Manage the Elementor plugin.
+  -s, --search-replace    Search & replace across the whole database.
+  -g, --blue-guard        Install the latest Blue Guard.
+
+  Plugin action (with -w / -e):
+  -r, --repair            Repair the current version.
+  -u, --update            Update to the latest version.
+  -i, --install           Install a specific version (see -V; asked if omitted).
+  -b, --rollback          Roll back to the previous copy (old-<slug>/).
+  -V, --version <ver>     Version for --install (e.g. 10.9.0).
+  -y, --yes               Activate after install / confirm rollback without asking.
+      --no-activate       Skip the post-install activation without asking.
+
+  Search & replace (with -s):
+  -o, --old <value>       Value to search for.
+  -n, --new <value>       Value to replace it with.
+      --dry-run           Count matches only, change nothing.
+      --apply             Perform the replacement.
+
+  -h, --help              Show this help and exit.
+
+Examples:
+  pro-plugin-manager.sh
+  pro-plugin-manager.sh -d site.ir --woocommerce --update -y
+  pro-plugin-manager.sh -p /home/u/public_html -e --install --version 3.21.0
+  pro-plugin-manager.sh -d site.ir -s --old http://old.ir --new https://new.ir --dry-run
+  pro-plugin-manager.sh -d site.ir --blue-guard
+EOF
+}
+
+# Only one feature / plugin action may be chosen at a time.
+set_feature() {
+    if [ -n "$FEATURE" ] && [ "$FEATURE" != "$1" ]; then
+        echo -e "${RED}✘ Only one feature may be given at a time.${NC}" >&2
+        exit 1
+    fi
+    FEATURE="$1"
+}
+set_paction() {
+    if [ -n "$PLUGIN_ACTION" ] && [ "$PLUGIN_ACTION" != "$1" ]; then
+        echo -e "${RED}✘ Only one plugin action may be given at a time.${NC}" >&2
+        exit 1
+    fi
+    PLUGIN_ACTION="$1"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--domain)        [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; DOMAIN="$2"; shift 2 ;;
+        -p|--path)          [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; WP_PATH="$2"; shift 2 ;;
+        -V|--version)       [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; REQ_VERSION="$2"; shift 2 ;;
+        -o|--old)           [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; SR_OLD="$2"; shift 2 ;;
+        -n|--new)           [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; SR_NEW="$2"; SR_NEW_SET="yes"; shift 2 ;;
+        -w|--woocommerce)   set_feature woocommerce; shift ;;
+        -e|--elementor)     set_feature elementor;   shift ;;
+        -s|--search-replace) set_feature search;     shift ;;
+        -g|--blue-guard)    set_feature blueguard;   shift ;;
+        -r|--repair)        set_paction repair;      shift ;;
+        -u|--update)        set_paction update;      shift ;;
+        -i|--install)       set_paction install;     shift ;;
+        -b|--rollback)      set_paction rollback;    shift ;;
+        -y|--yes)           ASSUME_YES="yes";        shift ;;
+        --no-activate)      NO_ACTIVATE="yes";       shift ;;
+        --dry-run)          SR_MODE="count";         shift ;;
+        --apply)            SR_MODE="apply";         shift ;;
+        -h|--help)          usage; exit 0 ;;
+        --)                 shift; break ;;
+        -*)                 echo -e "${RED}✘ Unknown option: $1${NC}" >&2; usage; exit 1 ;;
+        *)                  WP_PATH="$1"; shift ;;   # bare positional path
+    esac
+done
+
 
 #############################################
 #  HELPERS
@@ -60,9 +167,20 @@ print_header() {
     echo
 }
 
-# Resolve $WEBROOT from a domain (cPanel / DirectAdmin) or current dir.
+# Resolve $WEBROOT from --path, a domain (cPanel / DirectAdmin), or current dir.
 resolve_webroot() {
-    read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+    # An explicit --path wins outright.
+    if [ -n "$WP_PATH" ]; then
+        WEBROOT="$WP_PATH"
+        echo -e "${GREEN}✔ Using provided path:${NC}"
+        echo -e "${BLUE}Public Webroot:${NC} $WEBROOT"
+        return 0
+    fi
+
+    # Ask for a domain only when -d was not supplied.
+    if [ -z "$DOMAIN" ]; then
+        read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+    fi
 
     if [ -z "$DOMAIN" ]; then
         WEBROOT="$(pwd)"
@@ -384,7 +502,15 @@ manage_plugin() {
     echo -e "${YELLOW}4) Rollback to previous ($BACKUP_DIR)${NC}"
     echo
 
-    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" p_choice
+    # A --repair/--update/--install/--rollback flag skips this prompt.
+    local p_choice=""
+    case "$PLUGIN_ACTION" in
+        repair)   p_choice=1 ;;
+        update)   p_choice=2 ;;
+        install)  p_choice=3 ;;
+        rollback) p_choice=4 ;;
+        *)        read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" p_choice ;;
+    esac
 
     local TARGET_VER=""
     case "$p_choice" in
@@ -399,7 +525,11 @@ manage_plugin() {
             TARGET_VER=""   # latest
             ;;
         3)
-            read -p "$(echo -e ${YELLOW}"Enter version (example: 10.9.0): "${NC})" TARGET_VER
+            if [[ -n "$REQ_VERSION" ]]; then
+                TARGET_VER="$REQ_VERSION"
+            else
+                read -p "$(echo -e ${YELLOW}"Enter version (example: 10.9.0): "${NC})" TARGET_VER
+            fi
             if [[ -z "$TARGET_VER" ]]; then
                 echo -e "${RED}✘ Version cannot be empty.${NC}"
                 return 1
@@ -468,9 +598,17 @@ manage_plugin() {
         chown -R "$OWNER:$GROUP" "$PLUGIN_DIR" 2>/dev/null
     fi
 
-    # Activate + verify (optional, ask first)
+    # Activate + verify (optional, ask first).
+    # --yes activates without asking; --no-activate skips without asking.
     echo
-    read -p "$(echo -e ${YELLOW}"Activate $slug now with wp-cli? [y/N]: "${NC})" ACT_CONFIRM
+    local ACT_CONFIRM=""
+    if [[ "$NO_ACTIVATE" == "yes" ]]; then
+        ACT_CONFIRM="n"
+    elif [[ "$ASSUME_YES" == "yes" ]]; then
+        ACT_CONFIRM="y"
+    else
+        read -p "$(echo -e ${YELLOW}"Activate $slug now with wp-cli? [y/N]: "${NC})" ACT_CONFIRM
+    fi
     if [[ "$ACT_CONFIRM" =~ ^[Yy]$ ]]; then
         echo -e "${MAGENTA}Activating plugin...${NC}"
         if resolve_wp_cli; then
@@ -516,8 +654,10 @@ plugin_rollback() {
     OLD_VER=$(read_plugin_header_version "$BACKUP_DIR" "$slug")
 
     echo -e "${BLUE}Rollback target :${NC} ${OLD_VER:-unknown}"
-    read -p "$(echo -e ${YELLOW}'Restore the previous plugin? This replaces the current one [y/N]: '${NC})" CONFIRM
-    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
+    if [[ "$ASSUME_YES" != "yes" ]]; then
+        read -p "$(echo -e ${YELLOW}'Restore the previous plugin? This replaces the current one [y/N]: '${NC})" CONFIRM
+        [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
+    fi
 
     echo -e "${BLUE}Removing current plugin...${NC}"
     rm -rf "$PLUGIN_DIR"
@@ -648,8 +788,9 @@ search_and_replace() {
     echo -e "${BLUE}Target database:${NC} $DB_NAME ${BLUE}on${NC} $DB_HOST${DB_PORT:+:$DB_PORT}"
     echo
 
-    read -p "$(echo -e ${YELLOW}'Search for (old value): '${NC})" OLD
-    read -p "$(echo -e ${YELLOW}'Replace with (new value): '${NC})" NEW
+    # --old / --new answer these prompts up-front (an empty --new is valid).
+    if [[ -n "$SR_OLD" ]]; then OLD="$SR_OLD"; else read -p "$(echo -e ${YELLOW}'Search for (old value): '${NC})" OLD; fi
+    if [[ "$SR_NEW_SET" == "yes" ]]; then NEW="$SR_NEW"; else read -p "$(echo -e ${YELLOW}'Replace with (new value): '${NC})" NEW; fi
 
     if [[ -z "$OLD" ]]; then
         echo -e "${RED}✘ Search value cannot be empty.${NC}"
@@ -662,19 +803,22 @@ search_and_replace() {
     echo -e "${YELLOW}across the entire '$DB_NAME' database.${NC}"
     echo
 
-    # Mode selection (no CLI switches — menu driven).
-    echo -e "${CYAN}Select mode:${NC}"
-    echo -e "${YELLOW}1) Dry run (count matches only, no changes)${NC}"
-    echo -e "${YELLOW}2) Replace now${NC}"
-    echo
-    read -p "$(echo -e ${GREEN}"Enter choice [1-2]: "${NC})" mode_choice
-
+    # Mode selection — --dry-run / --apply skip this menu.
     local mode
-    case "$mode_choice" in
-        1) mode="count" ;;
-        2) mode="apply" ;;
-        *) echo -e "${RED}Invalid choice!${NC}"; return 1 ;;
-    esac
+    if [[ -n "$SR_MODE" ]]; then
+        mode="$SR_MODE"
+    else
+        echo -e "${CYAN}Select mode:${NC}"
+        echo -e "${YELLOW}1) Dry run (count matches only, no changes)${NC}"
+        echo -e "${YELLOW}2) Replace now${NC}"
+        echo
+        read -p "$(echo -e ${GREEN}"Enter choice [1-2]: "${NC})" mode_choice
+        case "$mode_choice" in
+            1) mode="count" ;;
+            2) mode="apply" ;;
+            *) echo -e "${RED}Invalid choice!${NC}"; return 1 ;;
+        esac
+    fi
     echo
 
     # Direct MySQL using credentials from wp-config.
@@ -703,16 +847,27 @@ show_menu() {
 main() {
     print_header
     resolve_webroot || exit 1
-    show_menu
 
-    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
+    # A feature flag skips the main menu; otherwise ask.
+    local feat="$FEATURE"
+    if [ -z "$feat" ]; then
+        show_menu
+        read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
+        case $choice in
+            1) feat="woocommerce" ;;
+            2) feat="elementor" ;;
+            3) feat="search" ;;
+            4) feat="blueguard" ;;
+            *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
+        esac
+    fi
 
-    case $choice in
-        1) manage_woocommerce ;;
-        2) manage_elementor ;;
-        3) search_and_replace ;;
-        4) install_blue_guard ;;
-        *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
+    case "$feat" in
+        woocommerce) manage_woocommerce ;;
+        elementor)   manage_elementor ;;
+        search)      search_and_replace ;;
+        blueguard)   install_blue_guard ;;
+        *)           echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
     esac
 }
 

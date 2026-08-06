@@ -90,9 +90,17 @@ This talks to the database directly through PHP CLI, so it works **even when wp-
 
 It offers to build the site from scratch: existing files are moved out of the way into `old-files/`, a database is created through the panel (cPanel/DirectAdmin) — or you enter DB details yourself — WordPress is downloaded, `wp-config.php` is written with fresh security salts, and ownership/permissions are set correctly.
 
+After an update, repair, install or fresh install, it reads the version back from `wp-includes/version.php` and prints exactly what landed on disk, so you can confirm the operation.
+
 ```bash
 sudo ./wp-core.sh
+# or answer every prompt up-front with flags:
+sudo ./wp-core.sh -d site.ir --update
+sudo ./wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
+sudo ./wp-core.sh -d site.ir --fresh --version latest -y
 ```
+
+Any flag you leave out is simply asked for interactively. Run `./wp-core.sh --help` for the full list.
 
 ---
 
@@ -135,7 +143,13 @@ Classic use: moving a site from `http://old-domain.ir` to `https://new-domain.ir
 
 ```bash
 sudo ./pro-plugin-manager.sh
+# or answer every prompt up-front with flags:
+sudo ./pro-plugin-manager.sh -d site.ir --woocommerce --update -y
+sudo ./pro-plugin-manager.sh -p /home/u/public_html -e --install --version 3.21.0
+sudo ./pro-plugin-manager.sh -d site.ir -s --old http://old.ir --new https://new.ir --dry-run
 ```
+
+Any flag you leave out is simply asked for interactively. Run `./pro-plugin-manager.sh --help` for the full list.
 
 ---
 
@@ -156,7 +170,7 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 
 **Second — how should it hunt?**
 
-Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first, and asks you to confirm each one before it's left disabled — pass `--auto-accept` to keep them all without prompting.
+Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first. In **manual** mode you confirm each culprit as it's found. In **automate** mode the hunt runs unattended, then does a re-verification pass — each identified culprit is switched back on and the site re-tested, and anything that no longer breaks it is treated as a false positive and left enabled — before confirming all the survivors with a single question. Pass `--auto-accept` to keep every find without prompting.
 
 | # | Strategy | Meaning |
 | --- | --- | --- |

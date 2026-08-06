@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.7.1
+#   Version   : 1.8.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.7.1"
+VERSION="1.8.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -50,7 +50,9 @@ Options:
   -l, --linear            Linear strategy — disable all, enable one-by-one.
   -b, --binary            Binary strategy — disable all, bisect by enabling.
       --auto-accept       Keep every identified culprit disabled without asking
-                          (otherwise each one is confirmed, even in automate mode).
+                          (otherwise culprits are confirmed — one at a time in
+                          manual mode, or all at once after a re-verification
+                          pass in automate mode).
   -h, --help              Show this help and exit.
 
 Examples:
@@ -351,17 +353,76 @@ PINNED=()        # plugins force-enabled as dependencies (e.g. WooCommerce)
 is_culprit() { local x; for x in "${CULPRITS[@]}"; do [[ "$x" == "$1" ]] && return 0; done; return 1; }
 is_pinned()  { local x; for x in "${PINNED[@]}";   do [[ "$x" == "$1" ]] && return 0; done; return 1; }
 
-# Announce a pinned-down culprit and let the operator decide whether it really
-# stays disabled — in both manual and automate mode. Only --auto-accept skips
-# the prompt and keeps it. Returns 0 to keep disabled, 1 to put it back.
+# Announce a pinned-down culprit and decide whether it stays disabled.
+# Manual mode confirms each culprit live (the human is already looking at the
+# site). Automate mode defers to a single re-verification + one confirmation at
+# the very end (see finalize_culprits), so the hunt runs unattended without a
+# question after every find. --auto-accept keeps everything without asking.
+# Returns 0 to keep disabled, 1 to put it back.
 keep_disabled() {
     local NAME="$1" ANS
     error "Identified and disabled: $NAME"
     [[ "$AUTO_ACCEPT" == "yes" ]] && return 0
+    [[ "$MODE" == "automate" ]] && return 0   # confirmed later, all at once
     read -r -p "Keep \"$NAME\" disabled? [Y/n, c=cancel]: " ANS
     [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$ANS" =~ ^[Nn]$ ]] && return 1
     return 0
+}
+
+# Finalize the hunt's culprit list. In automate mode a culprit might be a false
+# positive — an unlucky test ordering or a transient hiccup — so each identified
+# plugin is re-enabled on top of the (healthy) site and re-tested one by one: if
+# the site stays up it was not really guilty and is LEFT enabled; only plugins
+# that break the site again are kept disabled. Then a SINGLE question confirms
+# keeping all the survivors disabled (skipped by --auto-accept). Manual mode
+# already confirmed each culprit live, so its list passes through untouched.
+# Reads culprit names as arguments; sets the global CONFIRMED array.
+CONFIRMED=()
+finalize_culprits() {
+    CONFIRMED=("$@")
+    [[ "$MODE" != "automate" ]] && return
+    [ "$#" -eq 0 ] && return
+
+    local NAME RESULT
+    local -a survivors=()
+    echo
+    info "Re-verifying $# identified culprit(s) before finalizing — you might have gotten unlucky."
+    for NAME in "$@"; do
+        if [ ! -d "$PLUGINS/$NAME.off" ]; then
+            survivors+=("$NAME"); continue
+        fi
+        mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+        testmsg "Re-enabled $NAME — re-testing the site."
+        sleep 2
+        RESULT=$(check_site)
+        info "Site status: $RESULT"
+        if [[ "$RESULT" == "OK" ]]; then
+            success "$NAME did not break the site on re-test — leaving it enabled (false positive)."
+        else
+            mv "$PLUGINS/$NAME" "$PLUGINS/$NAME.off"
+            error "Confirmed culprit: $NAME"
+            survivors+=("$NAME")
+        fi
+    done
+    CONFIRMED=("${survivors[@]}")
+
+    # One question for every survivor, not one per plugin.
+    [[ "$AUTO_ACCEPT" == "yes" ]] && return
+    [ "${#CONFIRMED[@]}" -eq 0 ] && return
+    echo
+    info "These plugin(s) break the site and are kept disabled:"
+    for NAME in "${CONFIRMED[@]}"; do info "  - $NAME"; done
+    local ANS
+    read -r -p "Keep all of them disabled? [Y/n, c=cancel]: " ANS
+    [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
+    if [[ "$ANS" =~ ^[Nn]$ ]]; then
+        for NAME in "${CONFIRMED[@]}"; do
+            [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
+        done
+        info "Re-enabled all identified plugins at your request."
+        CONFIRMED=()
+    fi
 }
 
 # ---------- Verify Baseline ----------
@@ -454,12 +515,15 @@ linear_search() {
         fi
     done
 
+    # Automate mode: re-verify the finds and confirm them all with one question.
+    finalize_culprits "${problematic[@]}"
+
     echo
-    if [ "${#problematic[@]}" -eq 0 ]; then
+    if [ "${#CONFIRMED[@]}" -eq 0 ]; then
         success "Scan complete. No problematic plugin found — all re-enabled."
     else
-        success "Scan complete. ${#problematic[@]} problematic plugin(s) left disabled:"
-        for NAME in "${problematic[@]}"; do
+        success "Scan complete. ${#CONFIRMED[@]} problematic plugin(s) left disabled:"
+        for NAME in "${CONFIRMED[@]}"; do
             info "  - $NAME  (at $PLUGINS/$NAME.off)"
         done
     fi
@@ -604,12 +668,15 @@ binary_search() {
         [ -d "$PLUGINS/$NAME.off" ] && mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME"
     done
 
+    # Automate mode: re-verify the finds and confirm them all with one question.
+    finalize_culprits "${CULPRITS[@]}"
+
     echo
-    if [ "${#CULPRITS[@]}" -eq 0 ]; then
+    if [ "${#CONFIRMED[@]}" -eq 0 ]; then
         success "Scan complete. No plugin is left disabled."
     else
-        success "Scan complete. ${#CULPRITS[@]} problematic plugin(s) left disabled:"
-        for NAME in "${CULPRITS[@]}"; do
+        success "Scan complete. ${#CONFIRMED[@]} problematic plugin(s) left disabled:"
+        for NAME in "${CONFIRMED[@]}"; do
             info "  - $NAME  (at $PLUGINS/$NAME.off)"
         done
     fi

@@ -310,9 +310,9 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.5.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.7.1</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.2.0</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.6.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.8.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.3.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.0.1</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></button>
@@ -321,6 +321,17 @@
         <div class="entries" id="entries">
 
             <!-- ============ pro-plugin-manager.sh ============ -->
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-08-06">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.6.0</span><time datetime="2026-08-06">2026-08-06</time>
+                </div>
+                <ul class="en">
+                    <li>Added command-line flags so every prompt can be answered up-front: <code>-d/--domain</code>, <code>-p/--path</code>, feature selectors (<code>-w/--woocommerce</code>, <code>-e/--elementor</code>, <code>-s/--search-replace</code>, <code>-g/--blue-guard</code>), plugin actions (<code>-r/--repair</code>, <code>-u/--update</code>, <code>-i/--install</code> with <code>-V/--version</code>, <code>-b/--rollback</code>), <code>-y/--yes</code>, <code>--no-activate</code>, search &amp; replace values (<code>-o/--old</code>, <code>-n/--new</code>, <code>--dry-run</code>, <code>--apply</code>), and <code>-h/--help</code>. Omitting any still falls back to the interactive prompt.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن پرچم‌های خط فرمان تا بتوان همهٔ ورودی‌ها را مستقیم داد: <code>-d/--domain</code>، <code>-p/--path</code>، انتخاب قابلیت (<code>-w/--woocommerce</code>، <code>-e/--elementor</code>، <code>-s/--search-replace</code>، <code>-g/--blue-guard</code>)، عملیات افزونه (<code>-r/--repair</code>، <code>-u/--update</code>، <code>-i/--install</code> همراه <code>-V/--version</code>، <code>-b/--rollback</code>)، <code>-y/--yes</code>، <code>--no-activate</code>، مقادیر جستجو و جایگزینی (<code>-o/--old</code>، <code>-n/--new</code>، <code>--dry-run</code>، <code>--apply</code>) و <code>-h/--help</code>. هر ورودی‌ای که داده نشود، همچنان به‌صورت تعاملی پرسیده می‌شود.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="pro-plugin-manager" data-date="2026-07-12">
                 <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.5.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>
@@ -420,6 +431,17 @@
             </article>
 
             <!-- ============ plugin-hunter.sh ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-08-06">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.8.0</span><time datetime="2026-08-06">2026-08-06</time>
+                </div>
+                <ul class="en">
+                    <li>Automate mode no longer asks after every find. It hunts unattended, then runs a re-verification pass — each identified culprit is re-enabled and the site re-tested, and any that no longer breaks the site is treated as a false positive and left enabled — before confirming all the survivors with a single question (still skipped by <code>--auto-accept</code>).</li>
+                </ul>
+                <ul class="fa">
+                    <li>حالت automate دیگر بعد از هر پیدا‌کردن نمی‌پرسد. بدون دخالت پویش می‌کند، سپس یک مرحلهٔ بازبینی اجرا می‌کند — هر مقصر شناسایی‌شده دوباره فعال و سایت دوباره آزمایش می‌شود و هرکدام که دیگر سایت را خراب نکند به‌عنوان مثبت کاذب کنار گذاشته و فعال نگه داشته می‌شود — و بعد همهٔ باقی‌مانده‌ها با یک پرسش واحد تأیید می‌شوند (که با <code>--auto-accept</code> باز هم رد می‌شود).</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="plugin-hunter" data-date="2026-08-06">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.7.1</span><time datetime="2026-08-06">2026-08-06</time>
                 </div>
@@ -551,6 +573,19 @@
             </article>
 
             <!-- ============ wp-core.sh ============ -->
+            <article class="entry" data-script="wp-core" data-date="2026-08-06">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.3.0</span><time datetime="2026-08-06">2026-08-06</time>
+                </div>
+                <ul class="en">
+                    <li>Added command-line flags so every prompt can be answered up-front: <code>-d/--domain</code>, <code>-p/--path</code>, actions (<code>-r/--repair</code>, <code>-u/--update</code>, <code>-i/--install</code> with <code>-V/--version</code>, <code>-b/--rollback</code>, <code>-f/--fresh</code>, <code>-A/--admin</code>), <code>-y/--yes</code>, and <code>-h/--help</code>. Omitting any still falls back to the interactive prompt.</li>
+                    <li>After a repair/update/install (and a fresh install), the version that actually landed on disk is read back from <code>wp-includes/version.php</code> and shown as confirmation.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن پرچم‌های خط فرمان تا بتوان همهٔ ورودی‌ها را مستقیم داد: <code>-d/--domain</code>، <code>-p/--path</code>، عملیات‌ها (<code>-r/--repair</code>، <code>-u/--update</code>، <code>-i/--install</code> همراه <code>-V/--version</code>، <code>-b/--rollback</code>، <code>-f/--fresh</code>، <code>-A/--admin</code>)، <code>-y/--yes</code> و <code>-h/--help</code>. هر ورودی‌ای که داده نشود، همچنان به‌صورت تعاملی پرسیده می‌شود.</li>
+                    <li>پس از تعمیر/به‌روزرسانی/نصب (و نیز نصب تازه)، نسخه‌ای که واقعاً روی دیسک نشسته از <code>wp-includes/version.php</code> خوانده و به‌عنوان تأیید نمایش داده می‌شود.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="wp-core" data-date="2026-07-12">
                 <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.2.0</span><time datetime="2026-07-12">2026-07-12</time>
                 </div>

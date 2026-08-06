@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.2.0
+#   Version   : 1.3.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -20,6 +20,75 @@ BLUE='\033[1;34m'
 CYAN='\033[1;36m'
 MAGENTA='\033[1;35m'
 NC='\033[0m'
+
+#############################################
+#  USAGE + ARGUMENT PARSING
+#############################################
+# Flags let every prompt be answered up-front for non-interactive runs; any
+# value left unset simply falls back to its interactive prompt further down.
+usage() {
+    cat <<EOF
+Usage: wp-core.sh [options] [path]
+
+Repair, update, or install WordPress core, or provision a fresh site.
+Every option is optional; anything you omit is asked for interactively,
+so the script stays fully usable with no arguments at all.
+
+Options:
+  -d, --domain <domain>   Domain used to resolve the webroot (cPanel/DirectAdmin).
+  -p, --path <path>       Explicit path to the webroot (skips domain lookup).
+                          A bare positional path works too.
+  -r, --repair            Repair the currently installed version.
+  -u, --update            Update the core to the latest version.
+  -i, --install           Install a specific version (see -V; asked if omitted).
+  -b, --rollback          Roll back to the previous core (old-core/).
+  -f, --fresh             Fresh install — provision a brand-new site.
+  -A, --admin             Manage administrator users.
+  -V, --version <ver>     Version for --install / --fresh (e.g. 6.9.5, latest).
+  -y, --yes               Assume "yes" for confirmation prompts.
+  -h, --help              Show this help and exit.
+
+Examples:
+  wp-core.sh
+  wp-core.sh -d site.ir --update
+  wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
+  wp-core.sh -d site.ir --fresh --version latest -y
+EOF
+}
+
+DOMAIN=""
+WP_PATH=""
+ACTION=""
+REQ_VERSION=""
+ASSUME_YES=""
+
+# Only one action may be chosen at a time; a second one is a usage error.
+set_action() {
+    if [ -n "$ACTION" ] && [ "$ACTION" != "$1" ]; then
+        echo -e "${RED}✘ Only one action may be given at a time.${NC}" >&2
+        exit 1
+    fi
+    ACTION="$1"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -d|--domain)   [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; DOMAIN="$2"; shift 2 ;;
+        -p|--path)     [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; WP_PATH="$2"; shift 2 ;;
+        -V|--version)  [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; REQ_VERSION="$2"; shift 2 ;;
+        -r|--repair)   set_action repair;   shift ;;
+        -u|--update)   set_action update;   shift ;;
+        -i|--install)  set_action install;  shift ;;
+        -b|--rollback) set_action rollback; shift ;;
+        -f|--fresh)    set_action fresh;    shift ;;
+        -A|--admin)    set_action admin;    shift ;;
+        -y|--yes)      ASSUME_YES="yes";    shift ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            echo -e "${RED}✘ Unknown option: $1${NC}" >&2; usage; exit 1 ;;
+        *)             WP_PATH="$1"; shift ;;   # bare positional path
+    esac
+done
 
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -118,10 +187,23 @@ print_header
 PANEL=""
 CP_USER=""
 DOMAIN_FOUND=""
+WEBROOT=""
 
-read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+# An explicit --path wins outright. Otherwise resolve from a domain (asked for
+# only when -d was not supplied); an empty answer falls back to the current dir.
+if [ -n "$WP_PATH" ]; then
+    WEBROOT="$WP_PATH"
+    echo -e "${GREEN}✔ Using provided path:${NC}"
+    echo -e "${BLUE}Public Webroot:${NC} $WEBROOT"
+fi
 
-if [ -z "$DOMAIN" ]; then
+if [ -z "$WEBROOT" ] && [ -z "$DOMAIN" ]; then
+    read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+fi
+
+if [ -n "$WEBROOT" ]; then
+    :   # resolved from --path above
+elif [ -z "$DOMAIN" ]; then
     WEBROOT="$(pwd)"
     echo -e "${GREEN}✔ No domain entered. Using current directory:${NC}"
     echo -e "${BLUE}Public Webroot:${NC} $WEBROOT"
@@ -309,12 +391,19 @@ create_database() {
 fresh_install() {
     echo
     echo -e "${YELLOW}Fresh WordPress installation into:${NC} $WEBROOT"
-    read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5, type a version, or "latest"]: '${NC})" INSTALL_VERSION
-    INSTALL_VERSION=${INSTALL_VERSION:-6.9.5}
+    if [ -n "$REQ_VERSION" ]; then
+        INSTALL_VERSION="$REQ_VERSION"
+        echo -e "${BLUE}Version to install:${NC} $INSTALL_VERSION"
+    else
+        read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5, type a version, or "latest"]: '${NC})" INSTALL_VERSION
+        INSTALL_VERSION=${INSTALL_VERSION:-6.9.5}
+    fi
 
     echo -e "${RED}⚠ This moves EVERY existing file in the webroot into old-files/.${NC}"
-    read -p "$(echo -e ${YELLOW}'Proceed with fresh install? [y/N]: '${NC})" CONFIRM
-    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+    if [[ "$ASSUME_YES" != "yes" ]]; then
+        read -p "$(echo -e ${YELLOW}'Proceed with fresh install? [y/N]: '${NC})" CONFIRM
+        [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+    fi
 
     # 1) Provision the database first (abort before touching files if it fails).
     create_database || { echo -e "${RED}✘ Database setup failed. Aborting.${NC}"; exit 1; }
@@ -360,9 +449,15 @@ fresh_install() {
     local site_url=""
     [[ -n "$DOMAIN_FOUND" ]] && site_url="https://$DOMAIN_FOUND"
 
+    # Confirm the version that actually landed on disk.
+    local new_version=""
+    [[ -f "wp-includes/version.php" ]] && \
+        new_version=$(grep "\$wp_version =" wp-includes/version.php | cut -d"'" -f2)
+
     echo
     echo -e "${GREEN}✔ WordPress installation completed successfully!${NC}"
     echo -e "${CYAN}────────────────────────────────────────────${NC}"
+    [[ -n "$new_version" ]] && echo -e "  ${BLUE}Installed ver :${NC} $new_version"
     [[ -n "$site_url" ]] && echo -e "  ${BLUE}Website URL   :${NC} $site_url"
     echo -e "  ${BLUE}Webroot       :${NC} $WEBROOT"
     echo -e "  ${BLUE}Database name :${NC} $DB_NAME"
@@ -518,6 +613,22 @@ manage_admins() {
 #  STEP 2 — Menu
 #############################################
 
+# Flag-driven actions skip the interactive menu entirely; without a flag we
+# fall through to the numbered menu below.
+if [ -n "$ACTION" ]; then
+    case "$ACTION" in
+        repair)   action="repair" ;;
+        update)   action="update" ;;
+        install)  action="custom"
+                  [ -n "$REQ_VERSION" ] && CUSTOM_VERSION="$REQ_VERSION" ;;
+        rollback) action="rollback" ;;
+        admin)    manage_admins; exit $? ;;
+        fresh)    fresh_install; exit 0 ;;
+    esac
+fi
+
+if [ -z "$action" ]; then
+
 echo
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYAN}      Select WordPress Operation      ${NC}"
@@ -568,6 +679,8 @@ case $choice in
     *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
 esac
 
+fi   # end interactive menu (skipped when an action flag was given)
+
 
 #############################################
 #  STEP 3 — Validate WP installation
@@ -591,8 +704,10 @@ if [[ "$action" == "rollback" ]]; then
 
     echo -e "${BLUE}Current version :${NC} ${WP_VERSION:-unknown}"
     echo -e "${BLUE}Rollback target :${NC} ${OLD_VERSION:-unknown}"
-    read -p "$(echo -e ${YELLOW}'Restore the previous core? This replaces the current core [y/N]: '${NC})" CONFIRM
-    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+    if [[ "$ASSUME_YES" != "yes" ]]; then
+        read -p "$(echo -e ${YELLOW}'Restore the previous core? This replaces the current core [y/N]: '${NC})" CONFIRM
+        [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+    fi
 
     echo -e "${BLUE}Removing current core files...${NC}"
     rm -rf wp-admin wp-includes
@@ -648,7 +763,11 @@ elif [[ "$action" == "v695" ]]; then
     version_urls "6.9.5"
 
 elif [[ "$action" == "custom" ]]; then
-    read -p "Enter custom WP version (example: 6.8.3): " CUSTOM_VERSION
+    if [[ -z "$CUSTOM_VERSION" ]]; then
+        read -p "Enter custom WP version (example: 6.8.3): " CUSTOM_VERSION
+    else
+        echo -e "${GREEN}✔ Install version: $CUSTOM_VERSION${NC}"
+    fi
     version_urls "$CUSTOM_VERSION"
 fi
 
@@ -700,7 +819,18 @@ apply_permissions
 #  DONE
 #############################################
 
+# Read back the version that actually landed on disk and confirm it.
+NEW_WP_VERSION=""
+if [[ -f "wp-includes/version.php" ]]; then
+    NEW_WP_VERSION=$(grep "\$wp_version =" wp-includes/version.php | cut -d"'" -f2)
+fi
+
 echo
 echo -e "${GREEN}✔ WordPress core updated/repaired successfully!${NC}"
+if [[ -n "$NEW_WP_VERSION" ]]; then
+    echo -e "${GREEN}✔ Installed version: ${NEW_WP_VERSION}${NC}"
+else
+    echo -e "${YELLOW}⚠ Could not read the installed version from wp-includes/version.php.${NC}"
+fi
 echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
 echo
