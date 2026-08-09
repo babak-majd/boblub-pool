@@ -229,9 +229,9 @@ It's not menu-driven — it does one job, top to bottom:
 
 1. Reads the MySQL credentials from `/usr/local/directadmin/conf/mysql.conf` (no passwords to type).
 2. **Dumps the Roundcube database to `/root/` first**, timestamped. If the dump fails it warns and continues — because a missing database is often exactly the problem you're fixing.
-3. Drops the broken database and clears its leftover files out of the MySQL data directory (this is what fixes the cases a plain `DROP DATABASE` can't).
-4. Stops and restarts MySQL/MariaDB around that cleanup.
-5. Runs `da build roundcube` — DirectAdmin rebuilds Roundcube clean.
+3. Drops the broken database, auto-detecting the correct MySQL socket so the connection actually goes through.
+4. If leftover files remain in the MySQL data directory, it clears them **only after confirming the server is genuinely stopped** — it never deletes DB files under a live server (that's what caused `[1050] table already exists` rebuild failures), then restarts MySQL/MariaDB.
+5. Runs `da build roundcube` — DirectAdmin rebuilds Roundcube clean, and reports an honest pass/fail at the end.
 
 Everything is logged to `/tmp/bobclub_log/fix_roundcube.log`.
 
