@@ -180,6 +180,8 @@ Both strategies start the same way: **every plugin is disabled first**, and the 
 | **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues. Simple and predictable. |
 | **2** | binary | Isolates a culprit by bisection (~log₂n checks), then re-enables everything and re-tests: healthy → done; still broken → hunt the next one. Same complete result as linear, far fewer checks. **Recommended.** |
 
+**Fast path (tried first).** Before any of that, it asks WordPress directly *which* plugin fatally errored — reading the shown error, an existing `wp-content/debug.log`, or briefly turning on `WP_DEBUG_LOG` and re-triggering the site — then disables just that plugin and re-checks, looping for any further culprit. If that fixes the site the whole search is skipped; if the log names no plugin (e.g. the fault is in the theme), everything it touched is undone and the normal hunt runs exactly as before. Only the culprit line of a fatal is trusted, so an ordinary asset URL can't be mistaken for a culprit. Turn it off with `--no-fast`.
+
 Everything it does is logged to `/var/log/plugin-hunter/<domain>/<timestamp>.log` (with a `/tmp` fallback), and the path is printed when it finishes.
 
 ```bash

@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.9.0
+#   Version   : 1.10.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.9.0"
+VERSION="1.10.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -81,12 +81,22 @@ Options:
                           (otherwise culprits are confirmed — one at a time in
                           manual mode, or all at once after a re-verification
                           pass in automate mode).
+      --no-fast           Skip the fast path (see below) and go straight to the
+                          full linear/binary hunt.
   -h, --help              Show this help and exit.
+
+Before the full hunt, a FAST PATH tries to skip it entirely: it reads the plugin
+that fatally errored straight from WordPress (the shown error, an existing
+wp-content/debug.log, or by briefly turning on WP_DEBUG_LOG), disables just that
+plugin, and re-checks — looping for further culprits. If that fixes the site the
+long search is skipped; if not, anything it touched is undone and the normal hunt
+runs exactly as before.
 
 Examples:
   plugin-hunter.sh
   plugin-hunter.sh -d bob.ir --automate --binary
   plugin-hunter.sh -p /home/u/public_html --manual --linear
+  plugin-hunter.sh -d bob.ir --automate --no-fast
 EOF
 }
 
@@ -98,6 +108,7 @@ WP_DIR=""
 MODE=""
 STRATEGY=""
 AUTO_ACCEPT=""
+FAST="yes"                 # try the debug-log fast path before the full hunt
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -112,6 +123,7 @@ while [ $# -gt 0 ]; do
         -l|--linear)    STRATEGY="linear"; shift ;;
         -b|--binary)    STRATEGY="binary"; shift ;;
         --auto-accept)  AUTO_ACCEPT="yes"; shift ;;
+        --no-fast)      FAST=""; shift ;;
         -h|--help)      usage; exit 0 ;;
         --)            shift; break ;;
         -*)            error "Unknown option: $1"; usage; exit 1 ;;
@@ -213,6 +225,8 @@ fi
 
 PLUGINS="$WP_DIR/wp-content/plugins"
 PLUGINS_OFF="$WP_DIR/wp-content/plugins.off"
+DEBUG_LOG="$WP_DIR/wp-content/debug.log"   # WordPress writes fatals here (fast path)
+PH_EDITED_CFG=""                           # wp-config the fast path is editing, if any
 
 # Domain/webroot is resolved — begin capturing the run under its key (the domain,
 # or the webroot's name when a bare path was given with no domain).
@@ -297,6 +311,7 @@ restore_all(){
 cancel_scan(){
     echo
     info "Cancelling scan — restoring all plugins to their original state..."
+    [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$PH_EDITED_CFG"
     restore_all
     success "All plugins restored. Scan cancelled."
     exit 0
@@ -716,6 +731,122 @@ binary_search() {
     [ "${#PINNED[@]}" -gt 0 ] && info "Pinned on (kept enabled): ${PINNED[*]}"
     exit 0
 }
+
+#############################################
+#         FAST PATH (debug-log lookup)      #
+#############################################
+# The full hunt disables everything and bisects — many requests. If WordPress can
+# simply tell us WHICH plugin fatally errored, we disable that one, re-check, and
+# skip the whole search. The culprit is read from (in order): the live response
+# body (when display_errors shows the path), an existing wp-content/debug.log, or
+# — as a last resort — by briefly enabling WP_DEBUG_LOG and re-triggering the
+# site. wp-config is always restored, and if the log never fully fixes the site,
+# everything the fast path touched is undone so the normal hunt runs unchanged.
+
+find_wpconfig() {   # echo wp-config.php path or nothing
+    [ -f "$WP_DIR/wp-config.php" ] && { printf '%s' "$WP_DIR/wp-config.php"; return; }
+    local up; up=$(dirname "$WP_DIR")
+    [ -f "$up/wp-config.php" ] && printf '%s' "$up/wp-config.php"
+}
+
+# Turn WP_DEBUG_LOG on so fatals land in wp-content/debug.log; keep a backup.
+enable_debug_log() {   # $1 wp-config path
+    local cfg="$1"
+    cp -p "$cfg" "$cfg.plughunter.bak" 2>/dev/null || return 1
+    sed -i -E "s@^([[:space:]]*define\([[:space:]]*['\"](WP_DEBUG|WP_DEBUG_LOG|WP_DEBUG_DISPLAY)['\"])@// plugin-hunter // \1@" "$cfg"
+    awk 'BEGIN{d=0}
+         {print}
+         (!d && $0 ~ /<\?php/){
+             print "/* plugin-hunter temporary debug (auto-removed) */";
+             print "define(\047WP_DEBUG\047, true);";
+             print "define(\047WP_DEBUG_LOG\047, true);";
+             print "define(\047WP_DEBUG_DISPLAY\047, false);";
+             d=1
+         }' "$cfg" > "$cfg.phtmp" 2>/dev/null && mv "$cfg.phtmp" "$cfg" || {
+        mv -f "$cfg.plughunter.bak" "$cfg" 2>/dev/null; return 1; }
+    PH_EDITED_CFG="$cfg"
+}
+
+restore_wpconfig() {   # $1 wp-config path
+    [ -n "${1:-}" ] && [ -f "$1.plughunter.bak" ] && mv -f "$1.plughunter.bak" "$1"
+    PH_EDITED_CFG=""
+}
+
+# Pull the plugin slug from the newest fatal line in a blob of text (a page body
+# or a debug.log). Only fatal lines are considered, so an ordinary asset URL like
+# /wp-content/plugins/foo/style.css on a healthy page can never be mistaken for a
+# culprit.
+extract_plugin_slug() {   # $1 text -> echo slug or nothing
+    printf '%s' "$1" \
+        | grep -aiE 'fatal error|uncaught|PHP (Fatal|Parse|Compile)' \
+        | grep -aoiE 'wp-content/plugins/[^/"'"'"' ]+' \
+        | tail -n1 | sed -E 's@.*/@@'
+}
+
+# Try to fix the site from the debug log. Returns 0 (site healthy, culprits left
+# disabled in CONFIRMED) so the caller can exit; 1 to fall back to the full hunt.
+fastpath_hunt() {
+    local cfg body slug url n=0 max=8
+    local -a changed=()
+    cfg=$(find_wpconfig)
+    url="${CHECK_URL:-}"
+    [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
+
+    [ -n "$cfg" ] && restore_wpconfig "$cfg"   # clear a wp-config left edited by a crash
+
+    while [ "$n" -lt "$max" ]; do
+        n=$((n+1))
+        slug=""
+        # 1) the live response body (display_errors shows the path directly)
+        if [ -n "$url" ]; then
+            body=$(curl -s -L --connect-timeout 10 --max-time 25 "$url" 2>/dev/null)
+            slug=$(extract_plugin_slug "$body")
+        fi
+        # 2) an existing debug.log
+        [ -z "$slug" ] && [ -f "$DEBUG_LOG" ] && slug=$(extract_plugin_slug "$(tail -n 300 "$DEBUG_LOG" 2>/dev/null)")
+        # 3) last resort: turn WP_DEBUG_LOG on, re-trigger, read the fresh log
+        if [ -z "$slug" ] && [ -n "$cfg" ] && [ -n "$url" ]; then
+            [ -n "$PH_EDITED_CFG" ] || enable_debug_log "$cfg" || break
+            : > "$DEBUG_LOG" 2>/dev/null || true
+            curl -s -L --connect-timeout 10 --max-time 25 "$url" >/dev/null 2>&1
+            sleep 1
+            [ -f "$DEBUG_LOG" ] && slug=$(extract_plugin_slug "$(tail -n 300 "$DEBUG_LOG" 2>/dev/null)")
+        fi
+
+        [ -n "$slug" ] || break                 # nothing points at a plugin
+        is_pinned "$slug" && break              # a pinned dependency: not for us
+        [ -d "$PLUGINS/$slug" ] || break        # already off / not an active plugin
+
+        mv "$PLUGINS/$slug" "$PLUGINS/$slug.off" || break
+        changed+=("$slug")
+        testmsg "Debug log points at '$slug' — disabled it, re-checking."
+        sleep 2
+        ask_resolved
+        if [[ "$RESOLVED" == "yes" ]]; then
+            [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$cfg"
+            CONFIRMED=("${changed[@]}")
+            echo
+            success "Fast path: healthy after disabling ${#CONFIRMED[@]} plugin(s) read from the debug log — full hunt skipped:"
+            for slug in "${CONFIRMED[@]}"; do info "  - $slug  (at $PLUGINS/$slug.off)"; done
+            return 0
+        fi
+    done
+
+    # Inconclusive: undo everything so the normal hunt runs exactly as before.
+    [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$cfg"
+    local s
+    for s in "${changed[@]}"; do
+        [ -d "$PLUGINS/$s.off" ] && mv "$PLUGINS/$s.off" "$PLUGINS/$s"
+    done
+    [ "${#changed[@]}" -gt 0 ] && info "Fast path inconclusive — re-enabled ${#changed[@]} plugin(s); running the full hunt."
+    return 1
+}
+
+# ---------- Dispatch ----------
+# Try the quick debug-log fast path first; fall back to the chosen full strategy.
+if [[ "$FAST" == "yes" ]] && fastpath_hunt; then
+    exit 0
+fi
 
 if [[ "$STRATEGY" == "binary" ]]; then
     binary_search

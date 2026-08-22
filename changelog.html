@@ -311,7 +311,7 @@
 
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.9.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.4.0</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.2.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.2.0</span></button>
@@ -320,6 +320,17 @@
         </nav>
 
         <div class="entries" id="entries">
+
+            <article class="entry" data-script="plugin-hunter" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.10.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Added a <strong>fast path</strong> that tries to skip the full search: it reads the plugin that fatally errored straight from WordPress — the shown error body, an existing <code>wp-content/debug.log</code>, or by briefly turning on <code>WP_DEBUG_LOG</code> and re-triggering the site — disables just that plugin, and re-checks, looping for further culprits. If it fixes the site, the linear/binary hunt is skipped entirely; if not, everything it touched (plugins and <code>wp-config.php</code>) is undone so the normal hunt runs exactly as before. Only the culprit line of a fatal is trusted, so a plain asset URL on a healthy page can't be mistaken for a culprit. Opt out with <code>--no-fast</code>.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن یک <strong>مسیر سریع</strong> که تلاش می‌کند کل جست‌وجو را رد کند: افزونهٔ مقصر را مستقیم از خود وردپرس می‌خواند — از متن خطای نمایش‌داده‌شده، از <code>wp-content/debug.log</code> موجود، یا با روشن‌کردن موقت <code>WP_DEBUG_LOG</code> و بارگذاری دوبارهٔ سایت — فقط همان افزونه را غیرفعال می‌کند و دوباره بررسی می‌کند و برای مقصرهای بعدی هم تکرار می‌کند. اگر سایت درست شد، جست‌وجوی خطی/دودویی به‌کلی رد می‌شود؛ اگر نه، هر چیزی که دست‌کاری شده (افزونه‌ها و <code>wp-config.php</code>) به حالت اول برمی‌گردد تا هانت عادی دقیقاً مثل قبل اجرا شود. فقط خطِ مقصرِ یک fatal معتبر شمرده می‌شود، پس یک آدرس assetِ ساده در صفحهٔ سالم هرگز اشتباهی مقصر شناخته نمی‌شود. با <code>--no-fast</code> می‌توان خاموشش کرد.</li>
+                </ul>
+            </article>
 
             <article class="entry" data-script="magic-move" data-date="2026-08-22">
                 <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.2.0</span><time datetime="2026-08-22">2026-08-22</time>
