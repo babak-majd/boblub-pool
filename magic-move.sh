@@ -8,9 +8,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.0.0
+#   Version   : 2.1.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 set -u
 
@@ -23,8 +23,18 @@ CYAN="\e[36m"
 RESET="\e[0m"
 
 # ---------- Logging ----------
-LOG_FILE="/var/log/magic-move.log"
-touch "$LOG_FILE" 2>/dev/null || LOG_FILE="./magic-move.log"
+# The log lives under /var/log/<script>/ as one timestamped file per run. It is
+# whole-server work, so there is no per-domain sub-directory. The migration
+# CSV/report/snapshots are the *result* of the run and stay in the output folder
+# (see below) — they are deliberately not the log. Fall back to /tmp when
+# /var/log is not writable (e.g. not root).
+SCRIPT_NAME="magic-move"
+LOG_DIR="/var/log/${SCRIPT_NAME}"
+if ! mkdir -p "$LOG_DIR" 2>/dev/null || [ ! -w "$LOG_DIR" ]; then
+    LOG_DIR="/tmp/${SCRIPT_NAME}"
+    mkdir -p "$LOG_DIR"
+fi
+LOG_FILE="${LOG_DIR}/$(date +%F_%H-%M-%S).log"
 
 log() {
     echo "[$(date +'%F %T')] $*" >> "$LOG_FILE"
@@ -166,14 +176,12 @@ info "Mode: $MODE"
 # in a single move and both passes accumulate into it:
 #   magic-move/
 #     snapshots/before/   (source)   snapshots/after/  (destination)
-#     migration.csv       report.txt  magic-move.log
+#     migration.csv       report.txt
 [ -n "$OUT_DIR" ] || OUT_DIR="magic-move"
 OUT_CSV="$OUT_DIR/migration.csv"
 SNAP_DIR="$OUT_DIR/snapshots"
 REPORT_FILE="$OUT_DIR/report.txt"
 mkdir -p "$OUT_DIR" || { error "Cannot create output folder: $OUT_DIR"; exit 1; }
-# Keep the log with its run rather than in /var/log.
-if touch "$OUT_DIR/magic-move.log" 2>/dev/null; then LOG_FILE="$OUT_DIR/magic-move.log"; fi
 info "Output folder: $OUT_DIR"
 
 # ---------- Detect Server IP ----------
@@ -636,3 +644,5 @@ case "$MODE" in
     destination)   run_destination ;;
     *)             error "Unknown mode: $MODE"; exit 1 ;;
 esac
+
+echo -e "${CYAN}📄 Log saved to:${RESET} ${LOG_FILE}"

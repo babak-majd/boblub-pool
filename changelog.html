@@ -310,15 +310,83 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.6.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.8.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.3.0</span></button>
-            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.1.1</span></button>
-            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.0.2</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.9.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.4.0</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.1.0</span></button>
+            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.2.0</span></button>
+            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.1.0</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-08-22 · standardized logging ============ -->
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.7.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Added run logging: the whole run is captured to <code>/var/log/pro-plugin-manager/&lt;domain&gt;/&lt;timestamp&gt;.log</code> (falls back to <code>/tmp</code> when <code>/var/log</code> is not writable), and the log path is printed when it finishes.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن ثبت لاگ اجرا: کل اجرا در <code>/var/log/pro-plugin-manager/&lt;domain&gt;/&lt;timestamp&gt;.log</code> ذخیره می‌شود (اگر <code>/var/log</code> قابل نوشتن نباشد به <code>/tmp</code> برمی‌گردد) و در پایان، مسیر فایل لاگ چاپ می‌شود.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="plugin-hunter" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.9.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Reworked logging to the shared layout: one directory per script, one sub-directory per domain, one timestamped file per run — <code>/var/log/plugin-hunter/&lt;domain&gt;/&lt;timestamp&gt;.log</code> (was a single <code>/var/log/plugin-hunter.log</code>), with a <code>/tmp</code> fallback and the log path printed on exit.</li>
+                </ul>
+                <ul class="fa">
+                    <li>بازطراحی ثبت لاگ بر اساس چیدمان مشترک: یک دایرکتوری برای هر اسکریپت، یک زیر‌دایرکتوری برای هر دامنه و یک فایل زمان‌دار برای هر اجرا — <code>/var/log/plugin-hunter/&lt;domain&gt;/&lt;timestamp&gt;.log</code> (پیش‌تر یک فایل واحد <code>/var/log/plugin-hunter.log</code> بود)، همراه با بازگشت به <code>/tmp</code> و چاپ مسیر لاگ در پایان.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="wp-core" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.4.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Added run logging: the whole run is captured to <code>/var/log/wp-core/&lt;domain&gt;/&lt;timestamp&gt;.log</code> (falls back to <code>/tmp</code> when <code>/var/log</code> is not writable), and the log path is printed when it finishes.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن ثبت لاگ اجرا: کل اجرا در <code>/var/log/wp-core/&lt;domain&gt;/&lt;timestamp&gt;.log</code> ذخیره می‌شود (اگر <code>/var/log</code> قابل نوشتن نباشد به <code>/tmp</code> برمی‌گردد) و در پایان، مسیر فایل لاگ چاپ می‌شود.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="magic-move" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.1.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Moved the run log to the shared layout at <code>/var/log/magic-move/&lt;timestamp&gt;.log</code> (whole-server work, so no per-domain sub-directory; <code>/tmp</code> fallback). The migration CSV, report and snapshots stay in the output folder — they are the result, not the log — and the log path is printed on exit.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتقال لاگ اجرا به چیدمان مشترک در <code>/var/log/magic-move/&lt;timestamp&gt;.log</code> (کار در سطح کل سرور است، پس زیر‌دایرکتوری per-domain ندارد؛ با بازگشت به <code>/tmp</code>). فایل CSV مهاجرت، گزارش و اسنپ‌شات‌ها در پوشهٔ خروجی می‌مانند — آن‌ها نتیجهٔ کارند نه لاگ — و مسیر لاگ در پایان چاپ می‌شود.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="perm-patrol" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.2.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Added run logging: the whole run is captured to <code>/var/log/perm-patrol/&lt;user&gt;/&lt;timestamp&gt;.log</code> (falls back to <code>/tmp</code> when <code>/var/log</code> is not writable), and the log path is printed when it finishes.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن ثبت لاگ اجرا: کل اجرا در <code>/var/log/perm-patrol/&lt;user&gt;/&lt;timestamp&gt;.log</code> ذخیره می‌شود (اگر <code>/var/log</code> قابل نوشتن نباشد به <code>/tmp</code> برمی‌گردد) و در پایان، مسیر فایل لاگ چاپ می‌شود.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="fix-roundcube" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.1.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>Moved logging to the shared layout at <code>/var/log/fix-roundcube/&lt;timestamp&gt;.log</code> — one timestamped file per run, no per-domain sub-directory (was <code>/tmp/bobclub_log/fix_roundcube.log</code>), with a <code>/tmp</code> fallback and the log path printed at the end.</li>
+                </ul>
+                <ul class="fa">
+                    <li>انتقال ثبت لاگ به چیدمان مشترک در <code>/var/log/fix-roundcube/&lt;timestamp&gt;.log</code> — یک فایل زمان‌دار برای هر اجرا، بدون زیر‌دایرکتوری per-domain (پیش‌تر <code>/tmp/bobclub_log/fix_roundcube.log</code> بود)، همراه با بازگشت به <code>/tmp</code> و چاپ مسیر لاگ در پایان.</li>
+                </ul>
+            </article>
 
             <!-- ============ pro-plugin-manager.sh ============ -->
             <article class="entry" data-script="pro-plugin-manager" data-date="2026-08-06">

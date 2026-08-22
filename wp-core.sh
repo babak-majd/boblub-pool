@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.3.0
+#   Version   : 1.4.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.3.0"
+VERSION="1.4.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -20,6 +20,42 @@ BLUE='\033[1;34m'
 CYAN='\033[1;36m'
 MAGENTA='\033[1;35m'
 NC='\033[0m'
+
+#############################################
+#  LOGGING
+#############################################
+# Full run transcript under /var/log/<script>/<domain>/<timestamp>.log — one
+# directory per script, one sub-directory per target domain, one timestamped file
+# per run. start_log() is called once the domain/webroot is resolved; from then
+# on every line printed to the terminal is also appended (color-stripped) to the
+# log. Falls back to /tmp when /var/log is not writable (e.g. not root), and
+# finish_log() reports the final path on any exit.
+SCRIPT_NAME="wp-core"
+LOG_FILE=""
+_LOG_TEE_PID=""
+start_log() {
+    local key base dir
+    key=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+    base="/var/log/${SCRIPT_NAME}"
+    if ! mkdir -p "$base" 2>/dev/null || [ ! -w "$base" ]; then
+        base="/tmp/${SCRIPT_NAME}"; mkdir -p "$base" 2>/dev/null
+        echo -e "${YELLOW}⚠ /var/log not writable — logging under ${base}${NC}" >&2
+    fi
+    if [ -n "$key" ]; then dir="${base}/${key}"; else dir="$base"; fi
+    mkdir -p "$dir" 2>/dev/null
+    LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
+    exec 3>&1                       # keep the real stdout for the closing notice
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    _LOG_TEE_PID=$!
+}
+finish_log() {
+    [ -n "$LOG_FILE" ] || return 0
+    exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
+    [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
+    echo -e "${CYAN}📄 Log saved to:${NC} ${LOG_FILE}" >&3 2>/dev/null \
+        || echo "Log saved to: ${LOG_FILE}"
+}
+trap finish_log EXIT
 
 #############################################
 #  USAGE + ARGUMENT PARSING
@@ -273,6 +309,9 @@ else
 
     DOMAIN_FOUND="$DOMAIN"
 fi
+
+# Webroot/domain is resolved — begin capturing the run to the log.
+start_log "${DOMAIN:-$(basename "$WEBROOT")}"
 
 #############################################
 #  Change directory

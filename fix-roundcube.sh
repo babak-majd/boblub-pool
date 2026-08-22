@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.0.2
+#   Version   : 1.1.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.0.2"
+VERSION="1.1.0"
 
 # pipefail: a pipeline (e.g. `mysql ... | tee`) now reports the LEFT command's
 # failure instead of tee's success — this is what was masking real DB errors.
@@ -46,9 +46,6 @@ print_header() {
 }
 
 # ======== CONFIG ========
-log_dir="/tmp/bobclub_log"
-log_file="${log_dir}/fix_roundcube.log"
-
 DA_MYSQL_CONF="/usr/local/directadmin/conf/mysql.conf"
 
 DBNAME="da_roundcube"
@@ -57,16 +54,29 @@ MYSQL_DATA_DIR="/var/lib/mysql"
 TIMESTAMP=$(date +%F_%H-%M-%S)
 BACKUPFILE="/root/${DBNAME}_backup_${TIMESTAMP}.sql"
 
-mkdir -p "$log_dir"
+# ======== LOGGING ========
+# One directory per script under /var/log, one timestamped file per run. This
+# script has no per-domain/user key, so there is no sub-directory. When /var/log
+# is not writable (e.g. not root) we fall back to /tmp with the same layout.
+SCRIPT_NAME="fix-roundcube"
+log_dir="/var/log/${SCRIPT_NAME}"
+LOG_FELLBACK=0
+if ! mkdir -p "$log_dir" 2>/dev/null || [ ! -w "$log_dir" ]; then
+    log_dir="/tmp/${SCRIPT_NAME}"
+    mkdir -p "$log_dir"
+    LOG_FELLBACK=1
+fi
+log_file="${log_dir}/${TIMESTAMP}.log"
 
 # Overall status flag (0 = OK). Set to 1 on any real failure so the final
 # banner tells the truth instead of always claiming success.
 STATUS=0
 
 # ======== HELPERS ========
-# Log a styled line to screen + file.
+# Log a styled line to screen, and a plain (color-stripped) copy to the file.
 log() {
-    echo -e "${CYAN}$1${RESET}" | tee -a "$log_file"
+    echo -e "${CYAN}$1${RESET}"
+    printf '%b\n' "${CYAN}$1${RESET}" | sed 's/\x1b\[[0-9;]*m//g' >> "$log_file"
 }
 
 # Run a command, tee its output to the log, and return the command's REAL
@@ -119,6 +129,8 @@ detect_socket() {
 
 # ======== MAIN ========
 print_header
+
+[ "$LOG_FELLBACK" -eq 1 ] && log "${YELLOW}⚠️ /var/log not writable — logging under ${log_dir}${RESET}"
 
 log "${BLUE}${BOLD}📄 Reading MySQL credentials from:${RESET} ${DA_MYSQL_CONF}"
 
@@ -218,5 +230,7 @@ if [ "$STATUS" -eq 0 ]; then
 else
     log "${RED}${BOLD}⚠️ FINISHED WITH ERRORS — see ${log_file}${RESET}"
 fi
+
+log "${CYAN}📄 Log saved to:${RESET} ${log_file}"
 
 exit "$STATUS"

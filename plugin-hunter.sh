@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.8.0
+#   Version   : 1.9.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.8.0"
+VERSION="1.9.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -19,12 +19,41 @@ CYAN="\e[36m"
 RESET="\e[0m"
 
 # ---------- Logging ----------
-LOG_FILE="/var/log/plugin-hunter.log"
-touch "$LOG_FILE" 2>/dev/null || LOG_FILE="./plugin-hunter.log"
+# Logs live under /var/log/<script>/<domain>/<timestamp>.log — one directory per
+# script, one sub-directory per target domain, one timestamped file per run. The
+# domain is only known after resolution, so the log starts at the script root and
+# is re-homed under its domain via set_log_key() once resolved. Falls back to
+# /tmp when /var/log is not writable (e.g. not root).
+SCRIPT_NAME="plugin-hunter"
+LOG_BASE="/var/log/${SCRIPT_NAME}"
+if ! mkdir -p "$LOG_BASE" 2>/dev/null || [ ! -w "$LOG_BASE" ]; then
+    LOG_BASE="/tmp/${SCRIPT_NAME}"
+    mkdir -p "$LOG_BASE"
+fi
+LOG_TS="$(date +%F_%H-%M-%S)"
+LOG_FILE="${LOG_BASE}/${LOG_TS}.log"   # provisional until the domain is known
 
 log() {
     echo "[$(date +'%F %T')] $*" >> "$LOG_FILE"
 }
+
+# Re-home the log under a per-domain sub-directory once the key is known, moving
+# any lines already written. Safe to call once; a no-op on an empty key.
+set_log_key() {
+    local key dir new
+    key=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+    [ -n "$key" ] || return 0
+    dir="${LOG_BASE}/${key}"
+    mkdir -p "$dir" 2>/dev/null || return 0
+    new="${dir}/${LOG_TS}.log"
+    [ "$new" = "$LOG_FILE" ] && return 0
+    [ -f "$LOG_FILE" ] && { mv "$LOG_FILE" "$new" 2>/dev/null || cp "$LOG_FILE" "$new" 2>/dev/null; }
+    LOG_FILE="$new"
+}
+
+# Always tell the user where the log ended up, whatever exit path is taken.
+print_log_location() { [ -n "$LOG_FILE" ] && echo -e "${CYAN}📄 Log saved to:${RESET} ${LOG_FILE}"; }
+trap print_log_location EXIT
 
 info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; log "[INFO] $*"; }
 success(){ echo -e "${GREEN}[OK]${RESET} $*"; log "[OK] $*"; }
@@ -185,6 +214,10 @@ fi
 
 PLUGINS="$WP_DIR/wp-content/plugins"
 PLUGINS_OFF="$WP_DIR/wp-content/plugins.off"
+
+# Re-home the log under the resolved domain (or the webroot's name when a bare
+# path was given with no domain).
+set_log_key "${DOMAIN:-$(basename "$WP_DIR")}"
 
 info "Target WordPress path: $WP_DIR"
 
@@ -682,7 +715,6 @@ binary_search() {
     fi
     [ "${#declined[@]}" -gt 0 ] && info "Flagged but kept enabled at your request: ${declined[*]}"
     [ "${#PINNED[@]}" -gt 0 ] && info "Pinned on (kept enabled): ${PINNED[*]}"
-    info "Log file: $LOG_FILE"
     exit 0
 }
 

@@ -55,6 +55,8 @@ sudo ./wp-core.sh
 
 Every script prints its version in its terminal header. Full per-script release history lives in the bilingual changelog: **[material.bobclub.ir/changelog](https://material.bobclub.ir/changelog)**.
 
+**Logging.** Every run is logged under `/var/log/<script-name>/`, in a per-target sub-directory (the domain, or the user, depending on the script) with one timestamped file per run — e.g. `/var/log/plugin-hunter/site.ir/2026-08-22_14-30-05.log`. When `/var/log` isn't writable (you're not root), it falls back to the same layout under `/tmp`. Each script prints the exact log path when it finishes.
+
 ---
 
 ## 🧩 wp-core.sh
@@ -177,7 +179,7 @@ Both strategies start the same way: **every plugin is disabled first**, and the 
 | **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues. Simple and predictable. |
 | **2** | binary | Isolates a culprit by bisection (~log₂n checks), then re-enables everything and re-tests: healthy → done; still broken → hunt the next one. Same complete result as linear, far fewer checks. **Recommended.** |
 
-Everything it does is logged to `/var/log/plugin-hunter.log`.
+Everything it does is logged to `/var/log/plugin-hunter/<domain>/<timestamp>.log` (with a `/tmp` fallback), and the path is printed when it finishes.
 
 ```bash
 sudo ./plugin-hunter.sh
@@ -233,7 +235,7 @@ It's not menu-driven — it does one job, top to bottom:
 4. If leftover files remain in the MySQL data directory, it clears them **only after confirming the server is genuinely stopped** — it never deletes DB files under a live server (that's what caused `[1050] table already exists` rebuild failures), then restarts MySQL/MariaDB.
 5. Runs `da build roundcube` — DirectAdmin rebuilds Roundcube clean, and reports an honest pass/fail at the end.
 
-Everything is logged to `/tmp/bobclub_log/fix_roundcube.log`.
+Everything is logged to `/var/log/fix-roundcube/<timestamp>.log` (with a `/tmp` fallback), and the path is printed at the end.
 
 > 📮 Roundcube's database holds **contacts, settings and folder preferences** — not mail. Your actual emails live on disk in the mail store and are **not** affected.
 
