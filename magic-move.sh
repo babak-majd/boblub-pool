@@ -8,9 +8,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.1.0
+#   Version   : 2.2.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.1.0"
+VERSION="2.2.0"
 
 set -u
 
@@ -82,6 +82,9 @@ PHP_VERSIONS="8.3 8.1 7.4"    # cascade tried, in order, on a fixable failure
 TIMEOUTS="10 20 35 60"        # attempt 1 + three escalating retries on a 000
 SETTLE=2                      # pause after a version switch before re-checking
 DRY_RUN=""                    # destination: check & record, never switch PHP
+PLUGIN_HEAL="yes"             # destination: disable plugins that throw a fatal
+                              # (rename <slug> -> <slug>.dis), guided by WP_DEBUG
+PROTECTED_PLUGINS="elementor woocommerce"   # never disabled; matches slug or slug-*
 
 # ---------- Usage ----------
 usage() {
@@ -94,9 +97,11 @@ A migration is verified in two passes:
                   domain, and record it as status_before in $OUT_CSV. Snapshots
                   each page to $SNAP_DIR/before/<domain>.html. No changes made.
   2. DESTINATION  Take that CSV, re-check every domain against THIS server, and
-                  heal any broken PHP site (500 / WordPress / ionCube) by
-                  stepping its version down — recording status_after and
-                  snapshotting to $SNAP_DIR/after/<domain>.html.
+                  heal any broken site. For a plugin fatal it turns on WP_DEBUG,
+                  reads the culprit plugin from the error and disables it (renames
+                  <slug> to <slug>.dis) — Elementor and WooCommerce are never
+                  touched. Otherwise it steps the PHP version down. Records
+                  status_after and snapshots to $SNAP_DIR/after/<domain>.html.
 
 Every domain is probed with all hostnames pinned to this server, so a redirect
 to www/a subdomain follows onto the box we are testing, not wherever DNS points.
@@ -114,7 +119,13 @@ Options:
   -o, --outdir <dir>      Output folder for migration.csv + snapshots/.
                           (default: magic-move-source / magic-move-dest)
   -p, --php-versions <v>  DESTINATION: cascade to try, in order. (default: "$PHP_VERSIONS")
-  -n, --dry-run           DESTINATION: check & record only; never switch PHP.
+  -n, --dry-run           DESTINATION: check & record only; never switch PHP,
+                          never disable a plugin.
+      --no-plugin-heal    DESTINATION: do not disable plugins on a fatal; only
+                          step the PHP version.
+      --protect <list>    DESTINATION: extra plugin slugs never to disable
+                          (space/comma separated; added to the built-in
+                          "$PROTECTED_PLUGINS").
       --cpanel            Force the cPanel account detector.
       --directadmin       Force the DirectAdmin account detector.
   -h, --help              Show this help and exit.
@@ -124,6 +135,7 @@ Examples:
   magic-move.sh --source -r bob
   magic-move.sh --destination -f migration.csv
   magic-move.sh --destination -f https://host/migration.csv --dry-run
+  magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
 EOF
 }
 
@@ -151,6 +163,10 @@ while [ $# -gt 0 ]; do
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             PHP_VERSIONS="$2"; shift 2 ;;
         -n|--dry-run)    DRY_RUN="yes"; shift ;;
+        --no-plugin-heal) PLUGIN_HEAL=""; shift ;;
+        --protect)
+            [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
+            PROTECTED_PLUGINS="$PROTECTED_PLUGINS ${2//,/ }"; shift 2 ;;
         --cpanel)        PANEL="cpanel"; shift ;;
         --directadmin)   PANEL="directadmin"; shift ;;
         -h|--help)       usage; exit 0 ;;
@@ -356,6 +372,7 @@ health() {
     done
 
     [ -n "$snap" ] && save_snapshot "$domain" "$body" "$snap"
+    H_BODY="$body"          # exposed so the plugin-fatal healer can read the error
 
     # A PHP fatal can surface as either 200 (error thrown after headers flushed)
     # or 500 (thrown before). So inspect the BODY for a specific signature on
@@ -392,6 +409,118 @@ get_current_php() {
 switch_php() {
     [ -n "$DRY_RUN" ] && return 0
     selectorctl --set-user-current="$2" --user="$1" >/dev/null 2>&1
+}
+
+# ---------- Plugin-Fatal Healing (destination) ----------
+# When a site is down with a plugin fatal, WordPress normally shows a generic
+# "critical error" page that hides which plugin failed. So we turn WP_DEBUG +
+# WP_DEBUG_DISPLAY on, re-fetch, read the culprit plugin from the shown error's
+# path (.../wp-content/plugins/<slug>/...), disable it by renaming its folder to
+# <slug>.dis, and repeat for any further culprit — then restore wp-config.
+# Elementor and WooCommerce (and anything in --protect) are never disabled.
+
+# Resolve the on-disk webroot for a user+domain on either panel.
+resolve_webroot_for() {   # $1 user  $2 domain  -> echoes webroot or nothing
+    local user="$1" domain="$2" docroot=""
+    if [ -d /usr/local/cpanel ]; then
+        if [ -r "/var/cpanel/userdata/$user/$domain" ]; then
+            docroot=$(awk -F':[[:space:]]*' '$1=="documentroot"{print $2; exit}' \
+                      "/var/cpanel/userdata/$user/$domain")
+        fi
+        printf '%s' "${docroot:-/home/$user/public_html}"
+    elif [ -d /usr/local/directadmin ]; then
+        local conf="/usr/local/directadmin/data/users/$user/domains/$domain.conf"
+        [ -r "$conf" ] && docroot=$(awk -F= '$1=="document_root"{print $2; exit}' "$conf")
+        printf '%s' "${docroot:-/home/$user/domains/$domain/public_html}"
+    fi
+}
+
+# True when a plugin slug is protected (exact slug or "<slug>-*", e.g. elementor-pro).
+is_protected_plugin() {   # $1 slug
+    local p
+    for p in $PROTECTED_PLUGINS; do
+        [ -n "$p" ] || continue
+        case "$1" in "$p"|"$p"-*) return 0 ;; esac
+    done
+    return 1
+}
+
+# Find wp-config.php for a webroot (same dir, or one level up as WP allows).
+find_wp_config() {   # $1 webroot -> echoes path or nothing
+    [ -f "$1/wp-config.php" ] && { printf '%s' "$1/wp-config.php"; return; }
+    local up; up=$(dirname "$1")
+    [ -f "$up/wp-config.php" ] && printf '%s' "$up/wp-config.php"
+}
+
+# Turn WP_DEBUG + display on in a wp-config.php, keeping a restorable backup.
+enable_wp_debug() {   # $1 wp-config path
+    local cfg="$1"
+    cp -p "$cfg" "$cfg.magicmove.bak" 2>/dev/null || return 1
+    # Neutralise any existing debug/display defines so ours take effect cleanly.
+    sed -i -E "s@^([[:space:]]*define\([[:space:]]*['\"](WP_DEBUG|WP_DEBUG_DISPLAY|WP_DEBUG_LOG)['\"])@// magic-move // \1@" "$cfg"
+    # Inject our defines right after the first <?php.
+    awk 'BEGIN{done=0}
+         {print}
+         (!done && $0 ~ /<\?php/){
+             print "/* magic-move temporary debug (auto-removed) */";
+             print "define(\047WP_DEBUG\047, true);";
+             print "define(\047WP_DEBUG_DISPLAY\047, true);";
+             print "@ini_set(\047display_errors\047, 1);";
+             done=1
+         }' "$cfg" > "$cfg.mmtmp" 2>/dev/null && mv "$cfg.mmtmp" "$cfg" || {
+        mv -f "$cfg.magicmove.bak" "$cfg" 2>/dev/null; return 1; }
+}
+
+# Restore wp-config.php from its backup (no-op if there is none).
+restore_wp_config() {   # $1 wp-config path
+    [ -n "${1:-}" ] && [ -f "$1.magicmove.bak" ] && mv -f "$1.magicmove.bak" "$1"
+}
+
+# Heal a plugin fatal for one user+domain. Sets DISABLED_PLUGINS to a comma list
+# of slugs it turned off. Returns 0 when the site ends up healthy, else 1.
+heal_plugin_fatal() {   # $1 user  $2 domain
+    DISABLED_PLUGINS=""
+    [ -n "$PLUGIN_HEAL" ] || return 1
+    [ -z "$DRY_RUN" ] || return 1
+    local user="$1" domain="$2" wr cfg plugdir slug target n=0 max=6 rc=1
+    wr=$(resolve_webroot_for "$user" "$domain"); [ -n "$wr" ] || return 1
+    cfg=$(find_wp_config "$wr");                 [ -n "$cfg" ] || return 1
+    plugdir="$(dirname "$cfg")/wp-content/plugins"
+    [ -d "$plugdir" ] || plugdir="$wr/wp-content/plugins"
+    [ -d "$plugdir" ] || return 1
+
+    restore_wp_config "$cfg"        # self-heal any wp-config left edited by a crash
+    enable_wp_debug "$cfg" || return 1
+
+    while [ "$n" -lt "$max" ]; do
+        n=$((n+1))
+        health "$domain" ""         # re-fetch with debug on; no snapshot overwrite
+        if [ "$H_STATUS" = "OK" ]; then rc=0; break; fi
+        # The culprit is the first wp-content/plugins/<slug>/ path in the error.
+        slug=$(printf '%s' "$H_BODY" \
+               | grep -aoiE 'wp-content/plugins/[^/"'"'"' ]+' \
+               | head -n1 | sed -E 's@.*/@@')
+        [ -n "$slug" ] || break     # fatal not attributable to a plugin path
+        if is_protected_plugin "$slug"; then
+            printf ' -> %bculprit %s is protected%b' "$YELLOW" "$slug" "$RESET"
+            log "DEST PLUGIN-HEAL $domain culprit '$slug' protected — not disabling"
+            break
+        fi
+        [ -d "$plugdir/$slug" ] || break
+        target="$plugdir/$slug.dis"
+        [ -e "$target" ] && target="$plugdir/$slug.dis.$(date +%s)"
+        if mv "$plugdir/$slug" "$target" 2>/dev/null; then
+            DISABLED_PLUGINS="${DISABLED_PLUGINS:+$DISABLED_PLUGINS,}$slug"
+            printf ' -> %bdisabled %s%b' "$GREEN" "$slug" "$RESET"
+            log "DEST PLUGIN-DISABLED $domain -> $slug (-> $(basename "$target"))"
+        else
+            log "DEST PLUGIN-HEAL $domain could not rename $slug"
+            break
+        fi
+    done
+
+    restore_wp_config "$cfg"
+    return "$rc"
 }
 
 # ---------- Snapshot Helper ----------
@@ -567,18 +696,19 @@ run_destination() {
 
     [ -f "$tmp" ] && rm -f "$tmp"
 
-    local total=${#D[@]} i=0 okc=0 fixedc=0 failc=0 regress=0 bfail=0 start=$SECONDS
+    local total=${#D[@]} i=0 okc=0 fixedc=0 failc=0 regress=0 bfail=0 plugc=0 start=$SECONDS
     mkdir -p "$SNAP_DIR/after"
     local out_tmp; out_tmp=$(mktemp)
     echo "user,domain,status_before,status_after" >> "$out_tmp"
     info "Accounts to verify: $total"
     echo
 
-    local snap sa orig ver before_status
+    local snap sa orig ver before_status DISABLED_PLUGINS
     for ((idx=0; idx<total; idx++)); do
         user="${U[$idx]}"; domain="${D[$idx]}"; before_status="${SB[$idx]}"
         i=$((i+1))
         snap=$(snap_path after "$domain")
+        DISABLED_PLUGINS=""          # reset per account so counts never carry over
         printf '[%3d/%3d] %-35s' "$i" "$total" "$domain"
 
         health "$domain" "$snap"
@@ -589,31 +719,46 @@ run_destination() {
         fi
         sa="$H_STATUS"
 
-        # Heal only PHP-fixable failures, only here, only with a known user.
+        # Heal only fixable failures, only here, only with a known user.
         if [ "$H_BROKEN" = "yes" ] && [ -n "$user" ]; then
             before_fix="$H_STATUS"
-            orig=$(get_current_php "$user")
-            [ -n "$orig" ] && printf ' (was PHP %s)' "$orig"
-            for ver in $PHP_VERSIONS; do
-                [ "$ver" = "$orig" ] && continue
-                switch_php "$user" "$ver"; sleep "$SETTLE"
-                health "$domain" "$snap"
-                printf ' -> PHP %s -> %s' "$ver" "$H_STATUS"
-                [ "$H_BROKEN" != "yes" ] && break
-            done
-            if [ "$H_STATUS" = "OK" ]; then
-                sa="OK (fixed PHP $ver)"
+
+            # 1) Plugin-fatal healing first: a plugin code fatal (the common
+            #    "critical error" WSOD) is not something a PHP switch can fix.
+            case "$H_STATUS" in
+                "Fail(php fatal)"|"Fail(wp error)"|"Fail(500)")
+                    heal_plugin_fatal "$user" "$domain"
+                    [ -n "$DISABLED_PLUGINS" ] && health "$domain" "$snap"
+                    ;;
+            esac
+
+            if [ "$H_STATUS" = "OK" ] && [ -n "$DISABLED_PLUGINS" ]; then
+                sa="OK (disabled: $DISABLED_PLUGINS)"
                 printf ' -> %bfixed%b' "$GREEN" "$RESET"
-                log "DEST FIXED $domain -> PHP $ver (was ${orig:-?})"
+                log "DEST FIXED $domain by disabling: $DISABLED_PLUGINS"
             else
-                if [ -n "$orig" ]; then
+                # 2) Fall back to stepping the PHP version down.
+                orig=$(get_current_php "$user")
+                [ -n "$orig" ] && printf ' (was PHP %s)' "$orig"
+                for ver in $PHP_VERSIONS; do
+                    [ "$ver" = "$orig" ] && continue
+                    switch_php "$user" "$ver"; sleep "$SETTLE"
+                    health "$domain" "$snap"
+                    printf ' -> PHP %s -> %s' "$ver" "$H_STATUS"
+                    [ "$H_BROKEN" != "yes" ] && break
+                done
+                if [ "$H_STATUS" = "OK" ]; then
+                    sa="OK (fixed PHP $ver${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS})"
+                    printf ' -> %bfixed%b' "$GREEN" "$RESET"
+                    log "DEST FIXED $domain -> PHP $ver (was ${orig:-?})${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS}"
+                elif [ -n "$orig" ]; then
                     switch_php "$user" "$orig"
                     health "$domain" "$snap"      # snapshot the restored state
-                    sa="$before_fix (restored PHP $orig)"
+                    sa="$before_fix (restored PHP $orig${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS})"
                     printf ' -> %bnot fixed, restored PHP %s%b' "$RED" "$orig" "$RESET"
-                    log "DEST UNRESOLVED $domain — restored PHP $orig"
+                    log "DEST UNRESOLVED $domain — restored PHP $orig${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS}"
                 else
-                    sa="$before_fix"
+                    sa="$before_fix${DISABLED_PLUGINS:+ (disabled: $DISABLED_PLUGINS)}"
                     printf ' -> %bnot fixed (user/version unknown)%b' "$RED" "$RESET"
                     log "DEST UNRESOLVED $domain — original version unknown"
                 fi
@@ -622,6 +767,9 @@ run_destination() {
         echo
 
         # Tally against the source baseline.
+        if [ -n "$DISABLED_PLUGINS" ]; then
+            plugc=$((plugc + $(printf '%s' "$DISABLED_PLUGINS" | tr ',' '\n' | grep -c .)))
+        fi
         [ "$before_status" != "OK" ] && bfail=$((bfail+1))
         case "$sa" in
             OK) okc=$((okc+1)) ;;
@@ -643,6 +791,7 @@ run_destination() {
         echo "Problems now    : $failc"
         echo "  fixed here    : $fixedc"
         echo "  regressions   : $regress"
+        echo "Plugins disabled: $plugc"
         echo "Healthy now     : $okc"
         echo "Duration        : $dur"
     } > "$REPORT_FILE"
@@ -653,6 +802,7 @@ run_destination() {
     echo -e "  Report               : $REPORT_FILE"
     echo -e "  Accounts             : $i"
     echo -e "  Problems  ${YELLOW}before $bfail${RESET}  ->  ${GREEN}now $failc${RESET}   (fixed here: $fixedc)"
+    [ "$plugc" -gt 0 ] && echo -e "  ${YELLOW}Plugins disabled${RESET}     : $plugc"
     echo -e "  ${GREEN}Healthy now${RESET}          : $okc"
     [ "$regress" -gt 0 ] && echo -e "  ${RED}Regressions vs source${RESET}: $regress"
     echo -e "  Duration             : $dur"

@@ -313,13 +313,24 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.9.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.4.0</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.1.0</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.2.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.2.0</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.1.0</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <article class="entry" data-script="magic-move" data-date="2026-08-22">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.2.0</span><time datetime="2026-08-22">2026-08-22</time>
+                </div>
+                <ul class="en">
+                    <li>DESTINATION healing now clears plugin fatals, not just PHP-version issues. When a site is down with a plugin fatal (the "critical error" WSOD), it temporarily turns on <code>WP_DEBUG</code> + <code>WP_DEBUG_DISPLAY</code>, reads the culprit plugin from the shown error's <code>wp-content/plugins/&lt;slug&gt;/…</code> path, disables it by renaming the folder to <code>&lt;slug&gt;.dis</code>, and repeats for any further culprit — then restores <code>wp-config.php</code>. <strong>Elementor and WooCommerce are never disabled</strong> (extend the protected list with <code>--protect</code>). A plugin fatal is tried this way first; anything left over still falls back to stepping the PHP version. New flags: <code>--no-plugin-heal</code>, <code>--protect &lt;list&gt;</code>. The report/CSV record which plugins were disabled, and <code>--dry-run</code> changes nothing.</li>
+                </ul>
+                <ul class="fa">
+                    <li>ترمیم در سمت مقصد حالا fatalهای افزونه‌ای را هم برطرف می‌کند، نه فقط مشکلات نسخهٔ PHP. وقتی سایتی با fatal یک افزونه پایین است (همان صفحهٔ «یک خطای مهم رخ داد»)، به‌طور موقت <code>WP_DEBUG</code> و <code>WP_DEBUG_DISPLAY</code> را روشن می‌کند، افزونهٔ مقصر را از مسیر <code>wp-content/plugins/&lt;slug&gt;/…</code> در خطا می‌خواند، پوشه‌اش را به <code>&lt;slug&gt;.dis</code> تغییر نام می‌دهد و برای مقصرهای بعدی هم تکرار می‌کند — سپس <code>wp-config.php</code> را برمی‌گرداند. <strong>المنتور و ووکامرس هرگز غیرفعال نمی‌شوند</strong> (با <code>--protect</code> می‌توان لیست محافظت‌شده را گسترش داد). ابتدا این روش امتحان می‌شود؛ اگر مشکلی باقی ماند، به کاهش نسخهٔ PHP برمی‌گردد. سوییچ‌های جدید: <code>--no-plugin-heal</code>، <code>--protect &lt;list&gt;</code>. گزارش/CSV ثبت می‌کند کدام افزونه‌ها غیرفعال شدند و <code>--dry-run</code> هیچ تغییری نمی‌دهد.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-08-22 · standardized logging ============ -->
             <article class="entry" data-script="pro-plugin-manager" data-date="2026-08-22">

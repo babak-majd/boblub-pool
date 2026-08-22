@@ -50,6 +50,7 @@ sudo ./wp-core.sh
 | [`pro-plugin-manager.sh`](#-pro-plugin-managersh) | WooCommerce or Elementor is broken, or you need to search-replace the whole DB |
 | [`plugin-hunter.sh`](#-plugin-huntersh) | The site is white/500 and you don't know *which* plugin did it |
 | [`perm-patrol.sh`](#-perm-patrolsh) | File ownership or permissions on a hosting account are a mess |
+| [`magic-move.sh`](#-magic-movesh) | Verifying a whole-server migration and auto-healing sites that broke in transit |
 | [`fix-roundcube.sh`](#-fix-roundcubesh) | Roundcube webmail won't load on a DirectAdmin server |
 | [`thing-to-link.sh`](#-thing-to-linksh) | You need to hand someone a download link for a file, right now |
 
@@ -220,6 +221,31 @@ It prints every change it *would* make and exits. Run this first if you're nervo
 ```bash
 sudo ./perm-patrol.sh
 ```
+
+---
+
+## 🪄 magic-move.sh
+
+**Verifies a whole-server migration in two passes, and heals what broke in transit.** Run it on the **source** first, then on the **destination** — the output folder travels between them.
+
+Every domain is probed with **all hostnames pinned to the server being tested**, so a redirect to `www`/a subdomain follows onto that box, not wherever public DNS still points.
+
+1. **SOURCE** — detects every account (cPanel/DirectAdmin), health-checks each domain, records `status_before` in `migration.csv`, and snapshots each page to `snapshots/before/`. Changes nothing.
+2. **DESTINATION** — takes that CSV, re-checks every domain against *this* server, and **heals** anything broken:
+   - **Plugin fatal** (the WordPress "critical error" white screen): turns on `WP_DEBUG` + `WP_DEBUG_DISPLAY` just long enough to read the culprit plugin from the error, disables it by renaming its folder to `<slug>.dis`, and repeats for any further culprit — then restores `wp-config.php`. **Elementor and WooCommerce are never disabled** (extend the list with `--protect`).
+   - **Otherwise** it steps the PHP version down the cascade until the site comes back.
+
+   It records `status_after` (including which plugins it disabled), snapshots to `snapshots/after/`, and writes a `report.txt`.
+
+```bash
+sudo ./magic-move.sh --source
+sudo ./magic-move.sh --destination -f migration.csv
+sudo ./magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
+sudo ./magic-move.sh --destination -f migration.csv --no-plugin-heal   # PHP-only healing
+sudo ./magic-move.sh --destination -f migration.csv --dry-run          # check & report, change nothing
+```
+
+> ⚠️ On the destination, healing **modifies live sites** — it disables plugins and (on CloudLinux) switches PHP versions. Use `--dry-run` first to see what it *would* do. The migration CSV/report/snapshots are the result and stay in the output folder; the run log goes to `/var/log/magic-move/`.
 
 ---
 
