@@ -39,9 +39,12 @@ MODE=""                       # source | destination — prompted when unset
 PANEL=""                      # cpanel | directadmin — auto-detected / forced
 SERVER_IP=""                  # this server's IP; auto-detected default, prompted
 RESELLER=""                   # source: only accounts owned by this reseller
+USERS=""                      # source: only these specific users (space/comma)
 CSV_IN=""                     # destination: the CSV produced on the source
-OUT_CSV="migration.csv"       # written by both passes
-SNAP_DIR="snapshots"          # snapshots/before (source), snapshots/after (dest)
+OUT_DIR=""                    # output folder (default: magic-move-<mode>); holds
+                              # migration.csv + snapshots/ together
+OUT_CSV=""                    # derived: $OUT_DIR/migration.csv
+SNAP_DIR=""                   # derived: $OUT_DIR/snapshots
 PHP_VERSIONS="8.3 8.1 7.4"    # cascade tried, in order, on a fixable failure
 TIMEOUTS="10 20 35 60"        # attempt 1 + three escalating retries on a 000
 SETTLE=2                      # pause after a version switch before re-checking
@@ -74,7 +77,9 @@ Options:
                           SOURCE: optional "user,domain" list to use instead of
                           auto-detecting accounts.
   -r, --reseller <name>   SOURCE: only accounts owned by this reseller.
-  -o, --output <path>     Output CSV name. (default: $OUT_CSV)
+  -u, --users <list>      SOURCE: only these users (space/comma separated).
+  -o, --outdir <dir>      Output folder for migration.csv + snapshots/.
+                          (default: magic-move-source / magic-move-dest)
   -p, --php-versions <v>  DESTINATION: cascade to try, in order. (default: "$PHP_VERSIONS")
   -n, --dry-run           DESTINATION: check & record only; never switch PHP.
       --cpanel            Force the cPanel account detector.
@@ -103,9 +108,12 @@ while [ $# -gt 0 ]; do
         -r|--reseller)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             RESELLER="$2"; shift 2 ;;
-        -o|--output)
+        -u|--users)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
-            OUT_CSV="$2"; shift 2 ;;
+            USERS="$2"; shift 2 ;;
+        -o|--outdir)
+            [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
+            OUT_DIR="$2"; shift 2 ;;
         -p|--php-versions)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             PHP_VERSIONS="$2"; shift 2 ;;
@@ -152,6 +160,21 @@ if [ -z "$MODE" ]; then
     esac
 fi
 info "Mode: $MODE"
+
+# ---------- Output Layout ----------
+# One folder holds the whole job, so it can be copied (or zipped) between servers
+# in a single move and both passes accumulate into it:
+#   magic-move/
+#     snapshots/before/   (source)   snapshots/after/  (destination)
+#     migration.csv       report.txt  magic-move.log
+[ -n "$OUT_DIR" ] || OUT_DIR="magic-move"
+OUT_CSV="$OUT_DIR/migration.csv"
+SNAP_DIR="$OUT_DIR/snapshots"
+REPORT_FILE="$OUT_DIR/report.txt"
+mkdir -p "$OUT_DIR" || { error "Cannot create output folder: $OUT_DIR"; exit 1; }
+# Keep the log with its run rather than in /var/log.
+if touch "$OUT_DIR/magic-move.log" 2>/dev/null; then LOG_FILE="$OUT_DIR/magic-move.log"; fi
+info "Output folder: $OUT_DIR"
 
 # ---------- Detect Server IP ----------
 # Pin every domain to THIS server so we test the local install regardless of
@@ -219,6 +242,17 @@ detect_panel() {
     if [ -d /usr/local/cpanel ]; then PANEL="cpanel"
     elif [ -d /usr/local/directadmin ]; then PANEL="directadmin"
     else return 1; fi
+}
+
+# Filter owner<TAB>user<TAB>domain rows. Both panels carry an owner (cPanel
+# OWNER, DirectAdmin creator), so reseller filtering works on either.
+filter_users() {      # $1 rows, $2 space/comma user list
+    printf '%s\n' "$1" | awk -F'\t' -v list="$2" '
+        BEGIN { n=split(list, a, /[ ,]+/); for (k=1;k<=n;k++) if (a[k]!="") want[a[k]]=1 }
+        ($2 in want)'
+}
+filter_reseller() {   # $1 rows, $2 reseller name
+    printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r'
 }
 
 # ---------- Snapshot Writer ----------
@@ -291,18 +325,22 @@ health() {
 
     [ -n "$snap" ] && save_snapshot "$domain" "$body" "$snap"
 
+    # A PHP fatal can surface as either 200 (error thrown after headers flushed)
+    # or 500 (thrown before). So inspect the BODY for a specific signature on
+    # both codes and only fall back to a bare Fail(500) when none is found — a
+    # WordPress critical-error page that returns 500 must still read "wp error".
     H_BROKEN="no"
     if [ "$code" = "000" ]; then
         H_STATUS="Fail(timeout)"
-    elif [ "$code" = "500" ]; then
-        H_STATUS="Fail(500)"; H_BROKEN="yes"
-    elif [ "$code" = "200" ]; then
+    elif [ "$code" = "200" ] || [ "$code" = "500" ]; then
         if grep -qiE 'there has been a critical error|WordPress database error' <<<"$body"; then
             H_STATUS="Fail(wp error)"; H_BROKEN="yes"
         elif grep -qiE 'the ionCube Loader for PHP needs to be installed' <<<"$body"; then
             H_STATUS="Fail(ioncube)"; H_BROKEN="yes"
         elif grep -qiE '<b>Fatal error' <<<"$body"; then
             H_STATUS="Fail(php fatal)"; H_BROKEN="yes"
+        elif [ "$code" = "500" ]; then
+            H_STATUS="Fail(500)"; H_BROKEN="yes"
         elif grep -qiE '<html|<!doctype html' <<<"$body" && ! grep -qi '</html>' <<<"$body"; then
             H_STATUS="Fail(truncated)"; H_BROKEN="yes"
         else
@@ -329,13 +367,38 @@ snap_path() {   # $1 = subdir (before|after), $2 = domain
     printf '%s/%s/%s.html' "$SNAP_DIR" "$1" "$2"
 }
 
+# ---------- Duration ----------
+fmt_duration() {   # $1 = seconds -> "1h 02m 03s"
+    local s=$1 h m
+    h=$((s/3600)); m=$(((s%3600)/60)); s=$((s%60))
+    [ "$h" -gt 0 ] && printf '%dh %02dm %02ds' "$h" "$m" "$s" \
+        || { [ "$m" -gt 0 ] && printf '%dm %02ds' "$m" "$s" || printf '%ds' "$s"; }
+}
+
+# ---------- Offer To Zip ----------
+# The output folder is meant to travel to the other server; offer to bundle it.
+offer_zip() {
+    [ -t 0 ] || return 0            # non-interactive: leave the folder as-is
+    local ans
+    read -r -p "Zip the output folder for transfer? [y/N]: " ans
+    case "$ans" in [Yy]*) ;; *) return 0 ;; esac
+    if command -v zip >/dev/null 2>&1; then
+        rm -f "$OUT_DIR.zip"
+        ( zip -rq "$OUT_DIR.zip" "$OUT_DIR" ) && success "Created $OUT_DIR.zip"
+    else
+        ( tar -czf "$OUT_DIR.tar.gz" "$OUT_DIR" ) && success "zip not found — created $OUT_DIR.tar.gz"
+    fi
+}
+
 # ════════════════════════════════════════════════════════════
 #   SOURCE PASS
 # ════════════════════════════════════════════════════════════
 run_source() {
     local rows
 
-    # Accounts: an explicit "user,domain" list wins; otherwise auto-detect.
+    # Accounts: an explicit "user,domain" list wins; otherwise auto-detect and
+    # let the operator narrow the set (all / specific users / a reseller). Flags
+    # (-u / -r) skip the prompt for non-interactive runs.
     if [ -n "$CSV_IN" ]; then
         [ -f "$CSV_IN" ] || { error "List not found: $CSV_IN"; exit 1; }
         rows=$(awk -F, 'NF>=2 && $1!~/^#/ && $1!="" {print "?\t"$1"\t"$2}' "$CSV_IN")
@@ -343,13 +406,49 @@ run_source() {
         [ -n "$PANEL" ] || detect_panel || { error "No cPanel/DirectAdmin found. Use --cpanel/--directadmin or -f."; exit 1; }
         info "Detecting accounts via: $PANEL"
         rows=$("${PANEL}_rows")
-        if [ -n "$RESELLER" ]; then
-            rows=$(printf '%s\n' "$rows" | awk -F'\t' -v r="$RESELLER" '$1==r')
+        [ -n "$rows" ] || { error "No accounts detected."; exit 1; }
+
+        if [ -n "$USERS" ]; then
+            rows=$(filter_users "$rows" "$USERS")
+            [ -n "$rows" ] || { error "None of the given users matched."; exit 1; }
+        elif [ -n "$RESELLER" ]; then
+            rows=$(filter_reseller "$rows" "$RESELLER")
             [ -n "$rows" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; }
+        else
+            local total_all
+            total_all=$(printf '%s\n' "$rows" | grep -c .)
+            echo -e "${CYAN}Which accounts do you want to snapshot?${RESET}"
+            echo "  1) all accounts ($total_all)"
+            echo "  2) specific users"
+            echo "  3) a reseller's accounts"
+            read -r -p "Enter choice (1-3): " SEL
+            case "$SEL" in
+                1) : ;;
+                2) read -r -p "Usernames (space/comma separated): " USERS
+                   rows=$(filter_users "$rows" "$USERS")
+                   [ -n "$rows" ] || { error "None of the given users matched."; exit 1; } ;;
+                3) echo -e "${CYAN}Resellers with accounts:${RESET}"
+                   local reslist=() rline rnum rc rn ridx
+                   mapfile -t reslist < <(printf '%s\n' "$rows" | cut -f1 | sort | uniq -c | awk '{print $1" "$2}')
+                   ridx=1
+                   for rline in "${reslist[@]}"; do
+                       rc="${rline%% *}"; rn="${rline#* }"
+                       printf "  %2d) %-20s %s account(s)\n" "$ridx" "$rn" "$rc"
+                       ridx=$((ridx+1))
+                   done
+                   read -r -p "Enter reseller number: " rnum
+                   [[ "$rnum" =~ ^[0-9]+$ ]] && [ "$rnum" -ge 1 ] && [ "$rnum" -le "${#reslist[@]}" ] \
+                       || { error "Invalid selection."; exit 1; }
+                   rline="${reslist[$((rnum-1))]}"; RESELLER="${rline#* }"
+                   info "Reseller: $RESELLER"
+                   rows=$(filter_reseller "$rows" "$RESELLER")
+                   [ -n "$rows" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; } ;;
+                *) error "Invalid choice."; exit 1 ;;
+            esac
         fi
     fi
 
-    local total i=0 ok=0 fail=0
+    local total i=0 ok=0 fail=0 start=$SECONDS
     total=$(printf '%s\n' "$rows" | grep -c .)
     mkdir -p "$SNAP_DIR/before"
     : > "$OUT_CSV"
@@ -373,13 +472,32 @@ run_source() {
         log "SOURCE $domain (user=$user) $H_STATUS"
     done <<< "$rows"
 
+    local dur; dur=$(fmt_duration $((SECONDS-start)))
+
+    # Plain-text report kept alongside the data.
+    {
+        echo "Magic Move — SOURCE report"
+        echo "Date       : $(date +'%F %T')"
+        echo "Server IP  : $SERVER_IP"
+        echo "Panel      : ${PANEL:-list}"
+        [ -n "$RESELLER" ] && echo "Reseller   : $RESELLER"
+        echo "Accounts   : $i"
+        echo "Healthy    : $ok"
+        echo "Problems   : $fail"
+        echo "Duration   : $dur"
+    } > "$REPORT_FILE"
+
     echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
     echo -e "  Source snapshot written : $OUT_CSV"
     echo -e "  Page snapshots          : $SNAP_DIR/before/"
+    echo -e "  Report                  : $REPORT_FILE"
     echo -e "  Accounts                : $i    (${GREEN}OK $ok${RESET} / ${YELLOW}Fail $fail${RESET})"
+    echo -e "  Duration                : $dur"
     echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
-    echo -e "  Copy $OUT_CSV to the destination and run:  magic-move.sh --destination -f $OUT_CSV"
-    log "SOURCE done: $i accounts, OK=$ok Fail=$fail -> $OUT_CSV"
+    echo -e "  Copy the ${YELLOW}$OUT_DIR/${RESET} folder to the destination, then:  magic-move.sh --destination"
+    log "SOURCE done: $i accounts, OK=$ok Fail=$fail, ${dur} -> $OUT_CSV"
+
+    offer_zip
 }
 
 # ════════════════════════════════════════════════════════════
@@ -417,7 +535,7 @@ run_destination() {
 
     [ -f "$tmp" ] && rm -f "$tmp"
 
-    local total=${#D[@]} i=0 okc=0 fixedc=0 failc=0 regress=0
+    local total=${#D[@]} i=0 okc=0 fixedc=0 failc=0 regress=0 bfail=0 start=$SECONDS
     mkdir -p "$SNAP_DIR/after"
     local out_tmp; out_tmp=$(mktemp)
     echo "user,domain,status_before,status_after" >> "$out_tmp"
@@ -472,6 +590,7 @@ run_destination() {
         echo
 
         # Tally against the source baseline.
+        [ "$before_status" != "OK" ] && bfail=$((bfail+1))
         case "$sa" in
             OK) okc=$((okc+1)) ;;
             "OK "*) fixedc=$((fixedc+1)); okc=$((okc+1)) ;;
@@ -481,15 +600,34 @@ run_destination() {
     done
 
     mv "$out_tmp" "$OUT_CSV"
+    local dur; dur=$(fmt_duration $((SECONDS-start)))
+
+    {
+        echo "Magic Move — DESTINATION report"
+        echo "Date            : $(date +'%F %T')"
+        echo "Server IP       : $SERVER_IP"
+        echo "Accounts        : $i"
+        echo "Problems before : $bfail"
+        echo "Problems now    : $failc"
+        echo "  fixed here    : $fixedc"
+        echo "  regressions   : $regress"
+        echo "Healthy now     : $okc"
+        echo "Duration        : $dur"
+    } > "$REPORT_FILE"
 
     echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
     echo -e "  Verified CSV written : $OUT_CSV"
     echo -e "  Page snapshots       : $SNAP_DIR/after/"
+    echo -e "  Report               : $REPORT_FILE"
     echo -e "  Accounts             : $i"
-    echo -e "  ${GREEN}OK now${RESET}               : $okc   (of which fixed: $fixedc)"
-    echo -e "  ${RED}Still failing${RESET}        : $failc   (${RED}regressions vs source: $regress${RESET})"
+    echo -e "  Problems  ${YELLOW}before $bfail${RESET}  ->  ${GREEN}now $failc${RESET}   (fixed here: $fixedc)"
+    echo -e "  ${GREEN}Healthy now${RESET}          : $okc"
+    [ "$regress" -gt 0 ] && echo -e "  ${RED}Regressions vs source${RESET}: $regress"
+    echo -e "  Duration             : $dur"
     echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
-    log "DEST done: $i accounts, OK=$okc fixed=$fixedc fail=$failc regress=$regress -> $OUT_CSV"
+    log "DEST done: $i accounts, before_fail=$bfail now_fail=$failc fixed=$fixedc regress=$regress, ${dur} -> $OUT_CSV"
+
+    offer_zip
 }
 
 # ---------- Dispatch ----------
