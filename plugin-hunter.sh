@@ -18,47 +18,46 @@ BLUE="\e[34m"
 CYAN="\e[36m"
 RESET="\e[0m"
 
-# ---------- Logging ----------
-# Logs live under /var/log/<script>/<domain>/<timestamp>.log — one directory per
-# script, one sub-directory per target domain, one timestamped file per run. The
-# domain is only known after resolution, so the log starts at the script root and
-# is re-homed under its domain via set_log_key() once resolved. Falls back to
-# /tmp when /var/log is not writable (e.g. not root).
+# ---------- Logging  (standard block — identical across all bobclub scripts) ----------
+# One directory per script under /var/log, a sub-directory per target (the domain
+# or user; empty for whole-server scripts), and one timestamped file per run.
+# start_log <key> begins capturing the whole run to that file (colors stripped)
+# via tee once the target key is known; it falls back to /tmp when /var/log is
+# not writable (e.g. not root). finish_log() prints the final path on any exit.
+# Self-contained (literal colors, set -u safe) so the block stays byte-identical
+# between scripts.
 SCRIPT_NAME="plugin-hunter"
-LOG_BASE="/var/log/${SCRIPT_NAME}"
-if ! mkdir -p "$LOG_BASE" 2>/dev/null || [ ! -w "$LOG_BASE" ]; then
-    LOG_BASE="/tmp/${SCRIPT_NAME}"
-    mkdir -p "$LOG_BASE"
-fi
-LOG_TS="$(date +%F_%H-%M-%S)"
-LOG_FILE="${LOG_BASE}/${LOG_TS}.log"   # provisional until the domain is known
-
-log() {
-    echo "[$(date +'%F %T')] $*" >> "$LOG_FILE"
+LOG_FILE=""
+_LOG_TEE_PID=""
+start_log() {
+    local key base dir
+    key=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_')
+    base="/var/log/${SCRIPT_NAME}"
+    if ! mkdir -p "$base" 2>/dev/null || [ ! -w "$base" ]; then
+        base="/tmp/${SCRIPT_NAME}"; mkdir -p "$base" 2>/dev/null
+        printf '\033[1;33m⚠ /var/log not writable — logging under %s\033[0m\n' "$base" >&2
+    fi
+    if [ -n "$key" ]; then dir="${base}/${key}"; else dir="$base"; fi
+    mkdir -p "$dir" 2>/dev/null
+    LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
+    exec 3>&1                       # keep the real stdout for the closing notice
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    _LOG_TEE_PID=$!
 }
-
-# Re-home the log under a per-domain sub-directory once the key is known, moving
-# any lines already written. Safe to call once; a no-op on an empty key.
-set_log_key() {
-    local key dir new
-    key=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
-    [ -n "$key" ] || return 0
-    dir="${LOG_BASE}/${key}"
-    mkdir -p "$dir" 2>/dev/null || return 0
-    new="${dir}/${LOG_TS}.log"
-    [ "$new" = "$LOG_FILE" ] && return 0
-    [ -f "$LOG_FILE" ] && { mv "$LOG_FILE" "$new" 2>/dev/null || cp "$LOG_FILE" "$new" 2>/dev/null; }
-    LOG_FILE="$new"
+finish_log() {
+    [ -n "$LOG_FILE" ] || return 0
+    exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
+    [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
+    printf '\033[1;36m📄 Log saved to:\033[0m %s\n' "$LOG_FILE" >&3 2>/dev/null \
+        || echo "Log saved to: ${LOG_FILE}"
 }
+trap finish_log EXIT
 
-# Always tell the user where the log ended up, whatever exit path is taken.
-print_log_location() { [ -n "$LOG_FILE" ] && echo -e "${CYAN}📄 Log saved to:${RESET} ${LOG_FILE}"; }
-trap print_log_location EXIT
-
-info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; log "[INFO] $*"; }
-success(){ echo -e "${GREEN}[OK]${RESET} $*"; log "[OK] $*"; }
-error(){ echo -e "${RED}[ERROR]${RESET} $*"; log "[ERROR] $*"; }
-testmsg(){ echo -e "${BLUE}[TEST]${RESET} $*"; log "[TEST] $*"; }
+# These print to the terminal; the global tee (see start_log) captures them.
+info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; }
+success(){ echo -e "${GREEN}[OK]${RESET} $*"; }
+error(){ echo -e "${RED}[ERROR]${RESET} $*"; }
+testmsg(){ echo -e "${BLUE}[TEST]${RESET} $*"; }
 
 # ---------- Usage ----------
 usage() {
@@ -215,9 +214,9 @@ fi
 PLUGINS="$WP_DIR/wp-content/plugins"
 PLUGINS_OFF="$WP_DIR/wp-content/plugins.off"
 
-# Re-home the log under the resolved domain (or the webroot's name when a bare
-# path was given with no domain).
-set_log_key "${DOMAIN:-$(basename "$WP_DIR")}"
+# Domain/webroot is resolved — begin capturing the run under its key (the domain,
+# or the webroot's name when a bare path was given with no domain).
+start_log "${DOMAIN:-$(basename "$WP_DIR")}"
 
 info "Target WordPress path: $WP_DIR"
 

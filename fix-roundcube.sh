@@ -54,36 +54,55 @@ MYSQL_DATA_DIR="/var/lib/mysql"
 TIMESTAMP=$(date +%F_%H-%M-%S)
 BACKUPFILE="/root/${DBNAME}_backup_${TIMESTAMP}.sql"
 
-# ======== LOGGING ========
-# One directory per script under /var/log, one timestamped file per run. This
-# script has no per-domain/user key, so there is no sub-directory. When /var/log
-# is not writable (e.g. not root) we fall back to /tmp with the same layout.
+# ======== LOGGING  (standard block — identical across all bobclub scripts) ========
+# One directory per script under /var/log, a sub-directory per target (the domain
+# or user; empty for whole-server scripts), and one timestamped file per run.
+# start_log <key> begins capturing the whole run to that file (colors stripped)
+# via tee once the target key is known; it falls back to /tmp when /var/log is
+# not writable (e.g. not root). finish_log() prints the final path on any exit.
+# Self-contained (literal colors, set -u safe) so the block stays byte-identical
+# between scripts.
 SCRIPT_NAME="fix-roundcube"
-log_dir="/var/log/${SCRIPT_NAME}"
-LOG_FELLBACK=0
-if ! mkdir -p "$log_dir" 2>/dev/null || [ ! -w "$log_dir" ]; then
-    log_dir="/tmp/${SCRIPT_NAME}"
-    mkdir -p "$log_dir"
-    LOG_FELLBACK=1
-fi
-log_file="${log_dir}/${TIMESTAMP}.log"
+LOG_FILE=""
+_LOG_TEE_PID=""
+start_log() {
+    local key base dir
+    key=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_')
+    base="/var/log/${SCRIPT_NAME}"
+    if ! mkdir -p "$base" 2>/dev/null || [ ! -w "$base" ]; then
+        base="/tmp/${SCRIPT_NAME}"; mkdir -p "$base" 2>/dev/null
+        printf '\033[1;33m⚠ /var/log not writable — logging under %s\033[0m\n' "$base" >&2
+    fi
+    if [ -n "$key" ]; then dir="${base}/${key}"; else dir="$base"; fi
+    mkdir -p "$dir" 2>/dev/null
+    LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
+    exec 3>&1                       # keep the real stdout for the closing notice
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    _LOG_TEE_PID=$!
+}
+finish_log() {
+    [ -n "$LOG_FILE" ] || return 0
+    exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
+    [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
+    printf '\033[1;36m📄 Log saved to:\033[0m %s\n' "$LOG_FILE" >&3 2>/dev/null \
+        || echo "Log saved to: ${LOG_FILE}"
+}
+trap finish_log EXIT
 
 # Overall status flag (0 = OK). Set to 1 on any real failure so the final
 # banner tells the truth instead of always claiming success.
 STATUS=0
 
 # ======== HELPERS ========
-# Log a styled line to screen, and a plain (color-stripped) copy to the file.
+# Print a styled line; the global tee (see start_log) captures it to the log.
 log() {
     echo -e "${CYAN}$1${RESET}"
-    printf '%b\n' "${CYAN}$1${RESET}" | sed 's/\x1b\[[0-9;]*m//g' >> "$log_file"
 }
 
-# Run a command, tee its output to the log, and return the command's REAL
-# exit code (PIPESTATUS[0]) — not tee's. This is the core fix.
+# Run a command; its stdout+stderr are already captured by the global tee, so we
+# just run it and return its own exit code.
 run_logged() {
-    "$@" 2>&1 | tee -a "$log_file"
-    return "${PIPESTATUS[0]}"
+    "$@"
 }
 
 # Is a MySQL/MariaDB server process actually running? Process-based on purpose:
@@ -128,9 +147,8 @@ detect_socket() {
 }
 
 # ======== MAIN ========
+start_log ""          # no per-domain/user key: whole-server Roundcube repair
 print_header
-
-[ "$LOG_FELLBACK" -eq 1 ] && log "${YELLOW}⚠️ /var/log not writable — logging under ${log_dir}${RESET}"
 
 log "${BLUE}${BOLD}📄 Reading MySQL credentials from:${RESET} ${DA_MYSQL_CONF}"
 
@@ -158,7 +176,7 @@ MYSQL_CONN=(-u "$DBUSER" -p"$DBPASS")
 # ======== BACKUP ========
 log "${MAGENTA}${BOLD}📦 Attempting backup of database:${RESET} $DBNAME"
 
-if mysqldump "${MYSQL_CONN[@]}" "$DBNAME" > "$BACKUPFILE" 2>>"$log_file"; then
+if mysqldump "${MYSQL_CONN[@]}" "$DBNAME" 2>&1 > "$BACKUPFILE"; then
     log "${GREEN}✅ Backup created:${RESET} $BACKUPFILE"
 else
     log "${YELLOW}⚠️ Backup failed — database may not exist. Continuing...${RESET}"
@@ -221,16 +239,15 @@ if run_logged da build roundcube; then
     log "${GREEN}${BOLD}✅ Roundcube has been rebuilt successfully.${RESET}"
 else
     STATUS=1
-    log "${RED}${BOLD}❌ Error rebuilding Roundcube.${RESET} See ${log_file}"
+    log "${RED}${BOLD}❌ Error rebuilding Roundcube.${RESET} See ${LOG_FILE}"
 fi
 
 # ======== HONEST SUMMARY ========
 if [ "$STATUS" -eq 0 ]; then
     log "${GREEN}${BOLD}🎉 ALL DONE — Operation completed successfully.${RESET}"
 else
-    log "${RED}${BOLD}⚠️ FINISHED WITH ERRORS — see ${log_file}${RESET}"
+    log "${RED}${BOLD}⚠️ FINISHED WITH ERRORS — see ${LOG_FILE}${RESET}"
 fi
 
-log "${CYAN}📄 Log saved to:${RESET} ${log_file}"
-
+# finish_log (EXIT trap) prints the log path.
 exit "$STATUS"

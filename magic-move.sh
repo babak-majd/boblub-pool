@@ -22,27 +22,50 @@ BLUE="\e[34m"
 CYAN="\e[36m"
 RESET="\e[0m"
 
-# ---------- Logging ----------
-# The log lives under /var/log/<script>/ as one timestamped file per run. It is
-# whole-server work, so there is no per-domain sub-directory. The migration
-# CSV/report/snapshots are the *result* of the run and stay in the output folder
-# (see below) — they are deliberately not the log. Fall back to /tmp when
-# /var/log is not writable (e.g. not root).
+# ---------- Logging  (standard block — identical across all bobclub scripts) ----------
+# One directory per script under /var/log, a sub-directory per target (the domain
+# or user; empty for whole-server scripts — this one has no key), and one
+# timestamped file per run. start_log <key> begins capturing the whole run to
+# that file (colors stripped) via tee; it falls back to /tmp when /var/log is not
+# writable (e.g. not root). finish_log() prints the final path on any exit.
+# Self-contained (literal colors, set -u safe) so the block stays byte-identical
+# between scripts. The migration CSV/report/snapshots are the *result* of the run
+# and stay in the output folder (see below) — they are deliberately not the log.
 SCRIPT_NAME="magic-move"
-LOG_DIR="/var/log/${SCRIPT_NAME}"
-if ! mkdir -p "$LOG_DIR" 2>/dev/null || [ ! -w "$LOG_DIR" ]; then
-    LOG_DIR="/tmp/${SCRIPT_NAME}"
-    mkdir -p "$LOG_DIR"
-fi
-LOG_FILE="${LOG_DIR}/$(date +%F_%H-%M-%S).log"
-
-log() {
-    echo "[$(date +'%F %T')] $*" >> "$LOG_FILE"
+LOG_FILE=""
+_LOG_TEE_PID=""
+start_log() {
+    local key base dir
+    key=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_')
+    base="/var/log/${SCRIPT_NAME}"
+    if ! mkdir -p "$base" 2>/dev/null || [ ! -w "$base" ]; then
+        base="/tmp/${SCRIPT_NAME}"; mkdir -p "$base" 2>/dev/null
+        printf '\033[1;33m⚠ /var/log not writable — logging under %s\033[0m\n' "$base" >&2
+    fi
+    if [ -n "$key" ]; then dir="${base}/${key}"; else dir="$base"; fi
+    mkdir -p "$dir" 2>/dev/null
+    LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
+    exec 3>&1                       # keep the real stdout for the closing notice
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    _LOG_TEE_PID=$!
 }
+finish_log() {
+    [ -n "$LOG_FILE" ] || return 0
+    exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
+    [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
+    printf '\033[1;36m📄 Log saved to:\033[0m %s\n' "$LOG_FILE" >&3 2>/dev/null \
+        || echo "Log saved to: ${LOG_FILE}"
+}
+trap finish_log EXIT
 
-info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; log "[INFO] $*"; }
-success(){ echo -e "${GREEN}[OK]${RESET} $*"; log "[OK] $*"; }
-error(){ echo -e "${RED}[ERROR]${RESET} $*"; log "[ERROR] $*"; }
+# info/success/error print to the terminal (captured by the global tee); log()
+# appends an extra plain, machine-readable record to the log file only.
+log() {
+    [ -n "$LOG_FILE" ] && echo "[$(date +'%F %T')] $*" >> "$LOG_FILE"
+}
+info(){ echo -e "${YELLOW}[INFO]${RESET} $*"; }
+success(){ echo -e "${GREEN}[OK]${RESET} $*"; }
+error(){ echo -e "${RED}[ERROR]${RESET} $*"; }
 
 # ---------- Defaults ----------
 MODE=""                       # source | destination — prompted when unset
@@ -154,6 +177,7 @@ print_header() {
     echo -e "${C}${hr}${N}"
     echo
 }
+start_log ""          # whole-server run: no per-domain/user key
 print_header
 
 # ---------- Prompt: Mode ----------
@@ -644,5 +668,4 @@ case "$MODE" in
     destination)   run_destination ;;
     *)             error "Unknown mode: $MODE"; exit 1 ;;
 esac
-
-echo -e "${CYAN}📄 Log saved to:${RESET} ${LOG_FILE}"
+# finish_log (EXIT trap) prints the log path.

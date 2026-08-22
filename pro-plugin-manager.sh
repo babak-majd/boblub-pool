@@ -23,24 +23,25 @@ MAGENTA='\033[1;35m'
 NC='\033[0m'
 
 #############################################
-#  LOGGING
+#  LOGGING  (standard block — identical across all bobclub scripts)
 #############################################
-# Full run transcript under /var/log/<script>/<domain>/<timestamp>.log — one
-# directory per script, one sub-directory per target domain, one timestamped file
-# per run. start_log() is called once the domain/webroot is resolved; from then
-# on every line printed to the terminal is also appended (color-stripped) to the
-# log. Falls back to /tmp when /var/log is not writable (e.g. not root), and
-# finish_log() reports the final path on any exit.
+# One directory per script under /var/log, a sub-directory per target (the domain
+# or user; empty for whole-server scripts), and one timestamped file per run.
+# start_log <key> begins capturing the whole run to that file (colors stripped)
+# via tee once the target key is known; it falls back to /tmp when /var/log is
+# not writable (e.g. not root). finish_log() prints the final path on any exit.
+# Self-contained (literal colors, set -u safe) so the block stays byte-identical
+# between scripts.
 SCRIPT_NAME="pro-plugin-manager"
 LOG_FILE=""
 _LOG_TEE_PID=""
 start_log() {
     local key base dir
-    key=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+    key=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_')
     base="/var/log/${SCRIPT_NAME}"
     if ! mkdir -p "$base" 2>/dev/null || [ ! -w "$base" ]; then
         base="/tmp/${SCRIPT_NAME}"; mkdir -p "$base" 2>/dev/null
-        echo -e "${YELLOW}⚠ /var/log not writable — logging under ${base}${NC}" >&2
+        printf '\033[1;33m⚠ /var/log not writable — logging under %s\033[0m\n' "$base" >&2
     fi
     if [ -n "$key" ]; then dir="${base}/${key}"; else dir="$base"; fi
     mkdir -p "$dir" 2>/dev/null
@@ -53,7 +54,7 @@ finish_log() {
     [ -n "$LOG_FILE" ] || return 0
     exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
     [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
-    echo -e "${CYAN}📄 Log saved to:${NC} ${LOG_FILE}" >&3 2>/dev/null \
+    printf '\033[1;36m📄 Log saved to:\033[0m %s\n' "$LOG_FILE" >&3 2>/dev/null \
         || echo "Log saved to: ${LOG_FILE}"
 }
 trap finish_log EXIT
