@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.4.0
+#   Version   : 1.5.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.4.0"
+VERSION="1.5.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -82,6 +82,12 @@ Options:
   -f, --fresh             Fresh install — provision a brand-new site.
   -A, --admin             Manage administrator users.
   -V, --version <ver>     Version for --install / --fresh (e.g. 6.9.5, latest).
+  -z, --custom-url <url>  Use this URL as the core package instead of resolving
+                          a version (works with --install/--fresh; skips -V).
+  -Z, --custom-zip <path> Use this local zip file as the core package. Accepts
+                          either layout: zip -> wordpress/ -> wp-config-sample.php,
+                          etc. (default), or zip -> wp-config-sample.php, etc.
+                          directly at the zip root.
   -y, --yes               Assume "yes" for confirmation prompts.
   -h, --help              Show this help and exit.
 
@@ -90,6 +96,8 @@ Examples:
   wp-core.sh -d site.ir --update
   wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
   wp-core.sh -d site.ir --fresh --version latest -y
+  wp-core.sh -d site.ir --install --custom-url https://example.com/core.zip -y
+  wp-core.sh -p /home/u/public_html --install --custom-zip /root/core.zip -y
 EOF
 }
 
@@ -97,6 +105,8 @@ DOMAIN=""
 WP_PATH=""
 ACTION=""
 REQ_VERSION=""
+CUSTOM_URL=""
+CUSTOM_ZIP=""
 ASSUME_YES=""
 
 # Only one action may be chosen at a time; a second one is a usage error.
@@ -113,6 +123,8 @@ while [ $# -gt 0 ]; do
         -d|--domain)   [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; DOMAIN="$2"; shift 2 ;;
         -p|--path)     [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; WP_PATH="$2"; shift 2 ;;
         -V|--version)  [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; REQ_VERSION="$2"; shift 2 ;;
+        -z|--custom-url) [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; CUSTOM_URL="$2"; shift 2 ;;
+        -Z|--custom-zip) [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; CUSTOM_ZIP="$2"; shift 2 ;;
         -r|--repair)   set_action repair;   shift ;;
         -u|--update)   set_action update;   shift ;;
         -i|--install)  set_action install;  shift ;;
@@ -126,6 +138,11 @@ while [ $# -gt 0 ]; do
         *)             WP_PATH="$1"; shift ;;   # bare positional path
     esac
 done
+
+if [ -n "$CUSTOM_URL" ] && [ -n "$CUSTOM_ZIP" ]; then
+    echo -e "${RED}✘ Use either --custom-url or --custom-zip, not both.${NC}" >&2
+    exit 1
+fi
 
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -191,7 +208,35 @@ version_urls() {
     fi
 }
 
-# Download + extract a WordPress package, leaving an extracted `wordpress/` dir.
+# Extract wp.zip and normalize its contents into ./wordpress, whether the zip
+# wraps the core in a top-level wordpress/ folder (the wordpress.org layout) or
+# drops it flat at the zip root (some custom/mirror packages) — either way the
+# rest of the script only ever deals with a ./wordpress directory.
+extract_wp_zip() {
+    local zip_file="$1" stage
+    echo -e "${BLUE}Extracting...${NC}"
+    stage=$(mktemp -d) || { echo -e "${RED}✘ Could not create a staging directory.${NC}"; return 1; }
+    if ! unzip -q -o "$zip_file" -d "$stage"; then
+        echo -e "${RED}✘ Extraction failed!${NC}"; rm -rf "$stage"; return 1
+    fi
+
+    rm -rf wordpress   # clear any stale leftover before we (re)populate it
+    if [[ -d "$stage/wordpress" ]]; then
+        mv "$stage/wordpress" ./wordpress
+        rm -rf "$stage"
+    elif [[ -f "$stage/wp-settings.php" || -f "$stage/wp-load.php" ]]; then
+        mv "$stage" ./wordpress   # flat zip — the staged dir itself becomes wordpress/
+    else
+        echo -e "${RED}✘ Zip does not look like a WordPress core package${NC} (no wordpress/ folder and no wp-load.php at its root)."
+        rm -rf "$stage"
+        return 1
+    fi
+
+    [[ -d "wordpress" ]] || { echo -e "${RED}✘ Extraction failed!${NC}"; return 1; }
+    return 0
+}
+
+# Download + extract a WordPress package, leaving a normalized `wordpress/` dir.
 fetch_wp() {
     local url_ir="$1" url_org="$2"
     echo -e "${BLUE}↓ Downloading WordPress package...${NC}"
@@ -199,10 +244,29 @@ fetch_wp() {
         echo -e "${YELLOW}IR mirror failed, trying official source...${NC}"
         wget -O wp.zip "$url_org" || { echo -e "${RED}Download failed!${NC}"; return 1; }
     fi
-    echo -e "${BLUE}Extracting...${NC}"
-    unzip -q -o wp.zip || { echo -e "${RED}✘ Extraction failed!${NC}"; return 1; }
-    [[ -d "wordpress" ]] || { echo -e "${RED}✘ Extraction failed!${NC}"; return 1; }
-    return 0
+    extract_wp_zip wp.zip
+}
+
+# Resolve the WordPress core package to use: an operator-supplied local zip
+# (--custom-zip) or URL (--custom-url) take priority over the normal
+# IR-mirror/official version lookup.
+get_wp_package() {
+    local version="$1"
+    if [[ -n "$CUSTOM_ZIP" ]]; then
+        echo -e "${BLUE}Using custom core zip:${NC} $CUSTOM_ZIP"
+        [[ -f "$CUSTOM_ZIP" ]] || { echo -e "${RED}✘ Zip file not found: $CUSTOM_ZIP${NC}"; return 1; }
+        cp -- "$CUSTOM_ZIP" wp.zip || { echo -e "${RED}✘ Could not stage zip file.${NC}"; return 1; }
+        extract_wp_zip wp.zip
+        return $?
+    fi
+    if [[ -n "$CUSTOM_URL" ]]; then
+        echo -e "${BLUE}↓ Downloading custom WordPress package...${NC} $CUSTOM_URL"
+        wget -O wp.zip "$CUSTOM_URL" || { echo -e "${RED}Download failed!${NC}"; return 1; }
+        extract_wp_zip wp.zip
+        return $?
+    fi
+    version_urls "$version"
+    fetch_wp "$URL_IR" "$URL_ORG"
 }
 
 # Apply standard ownership + permissions to the whole webroot.
@@ -434,9 +498,21 @@ fresh_install() {
     if [ -n "$REQ_VERSION" ]; then
         INSTALL_VERSION="$REQ_VERSION"
         echo -e "${BLUE}Version to install:${NC} $INSTALL_VERSION"
+    elif [[ -n "$CUSTOM_ZIP" ]]; then
+        echo -e "${BLUE}Custom core zip:${NC} $CUSTOM_ZIP"
+    elif [[ -n "$CUSTOM_URL" ]]; then
+        echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
     else
-        read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5, type a version, or "latest"]: '${NC})" INSTALL_VERSION
-        INSTALL_VERSION=${INSTALL_VERSION:-6.9.5}
+        read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5], "latest", or a custom zip URL/local path: '${NC})" INSTALL_INPUT
+        if [[ "$INSTALL_INPUT" =~ ^https?:// ]]; then
+            CUSTOM_URL="$INSTALL_INPUT"
+            echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
+        elif [[ -n "$INSTALL_INPUT" && -f "$INSTALL_INPUT" ]]; then
+            CUSTOM_ZIP="$INSTALL_INPUT"
+            echo -e "${BLUE}Custom core zip:${NC} $CUSTOM_ZIP"
+        else
+            INSTALL_VERSION=${INSTALL_INPUT:-6.9.5}
+        fi
     fi
 
     echo -e "${RED}⚠ This moves EVERY existing file in the webroot into old-files/.${NC}"
@@ -460,8 +536,7 @@ fresh_install() {
     rmdir old-files 2>/dev/null   # remove if nothing was moved
 
     # 3) Download + extract WordPress.
-    version_urls "$INSTALL_VERSION"
-    fetch_wp "$URL_IR" "$URL_ORG" || exit 1
+    get_wp_package "$INSTALL_VERSION" || exit 1
 
     # 4) Lay down the core.
     echo -e "${BLUE}Installing WordPress core...${NC}"
@@ -788,27 +863,40 @@ fi
 #  STEP 4 — Determine package URL
 #############################################
 
+PKG_VERSION=""
+
 if [[ "$action" == "repair" ]]; then
     if [[ -z "$WP_VERSION" ]]; then
         echo -e "${RED}✘ Could not detect installed version to repair.${NC}"
         exit 1
     fi
     echo -e "${GREEN}✔ Installed Version: $WP_VERSION${NC}"
-    version_urls "$WP_VERSION"
+    PKG_VERSION="$WP_VERSION"
 
 elif [[ "$action" == "update" ]]; then
-    version_urls "latest"
+    PKG_VERSION="latest"
 
 elif [[ "$action" == "v695" ]]; then
-    version_urls "6.9.5"
+    PKG_VERSION="6.9.5"
 
 elif [[ "$action" == "custom" ]]; then
-    if [[ -z "$CUSTOM_VERSION" ]]; then
-        read -p "Enter custom WP version (example: 6.8.3): " CUSTOM_VERSION
-    else
+    if [[ -n "$CUSTOM_VERSION" ]]; then
         echo -e "${GREEN}✔ Install version: $CUSTOM_VERSION${NC}"
+    elif [[ -n "$CUSTOM_ZIP" ]]; then
+        echo -e "${BLUE}Custom core zip:${NC} $CUSTOM_ZIP"
+    elif [[ -n "$CUSTOM_URL" ]]; then
+        echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
+    else
+        read -p "Enter custom WP version (example: 6.8.3), or a custom zip URL/local path: " CUSTOM_INPUT
+        if [[ "$CUSTOM_INPUT" =~ ^https?:// ]]; then
+            CUSTOM_URL="$CUSTOM_INPUT"
+        elif [[ -n "$CUSTOM_INPUT" && -f "$CUSTOM_INPUT" ]]; then
+            CUSTOM_ZIP="$CUSTOM_INPUT"
+        else
+            CUSTOM_VERSION="$CUSTOM_INPUT"
+        fi
     fi
-    version_urls "$CUSTOM_VERSION"
+    PKG_VERSION="$CUSTOM_VERSION"
 fi
 
 
@@ -816,7 +904,7 @@ fi
 #  STEP 5 — Download & Replace Core
 #############################################
 
-fetch_wp "$URL_IR" "$URL_ORG" || exit 1
+get_wp_package "$PKG_VERSION" || exit 1
 
 
 #############################################

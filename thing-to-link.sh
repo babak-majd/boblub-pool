@@ -6,12 +6,53 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.0.1
+#   Version   : 1.1.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.0.1"
+VERSION="1.1.0"
 set +H
 
 WEBROOT="/var/www/html"
+
+# ---------- Usage + argument parsing ----------
+# Flags let every prompt be answered up-front for non-interactive runs; any
+# value left unset simply falls back to its interactive prompt further down.
+usage() {
+    cat <<EOF
+Usage: thing-to-link.sh [options] [input]
+
+Fetch a file, directory, or URL and make it downloadable from the web root.
+Every option is optional; anything you omit is asked for interactively, so
+the script stays fully usable with no arguments at all.
+
+Options:
+  -i, --input <path|url>  File, directory, or URL to publish. A bare
+                          positional value works too.
+  -w, --webroot <dir>     Web root to publish into (default: /var/www/html).
+  -c, --compress <type>   Compression for a directory input: tar.gz or zip
+                          (skips the interactive prompt).
+  -h, --help              Show this help and exit.
+
+Examples:
+  thing-to-link.sh
+  thing-to-link.sh -i https://example.com/file.zip
+  thing-to-link.sh -i /home/user/backups -c zip -w /var/www/html
+EOF
+}
+
+input=""
+COMPRESS=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -i|--input)    [ -n "${2:-}" ] || { echo -e "\033[31m✘ $1 requires a value.\033[0m" >&2; exit 1; }; input="$2"; shift 2 ;;
+        -w|--webroot)  [ -n "${2:-}" ] || { echo -e "\033[31m✘ $1 requires a value.\033[0m" >&2; exit 1; }; WEBROOT="$2"; shift 2 ;;
+        -c|--compress) [ -n "${2:-}" ] || { echo -e "\033[31m✘ $1 requires a value.\033[0m" >&2; exit 1; }; COMPRESS="$2"; shift 2 ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            echo -e "\033[31m✘ Unknown option: $1\033[0m" >&2; usage; exit 1 ;;
+        *)             input="$1"; shift ;;   # bare positional input
+    esac
+done
 
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -32,7 +73,9 @@ print_header() {
 }
 print_header
 
-read -p $'\033[36mEnter file path, directory, or URL:\033[0m ' input
+if [[ -z "$input" ]]; then
+    read -p $'\033[36mEnter file path, directory, or URL:\033[0m ' input
+fi
 
 # اگر ورودی یک URL باشد
 if [[ "$input" =~ ^https?:// ]]; then
@@ -75,20 +118,29 @@ elif [ -d "$input" ]; then
     dirname=$(basename "$input")
 
     echo -e "\033[33mDetected directory: $dirname\033[0m"
-    echo "Choose compression type:"
-    echo "1) tar.gz"
-    echo "2) zip"
 
-    read -p "Enter option (1 or 2): " opt
+    if [[ -n "$COMPRESS" ]]; then
+        comp_type="$COMPRESS"
+    else
+        echo "Choose compression type:"
+        echo "1) tar.gz"
+        echo "2) zip"
+        read -p "Enter option (1 or 2): " opt
+        case "$opt" in
+            1) comp_type="tar.gz" ;;
+            2) comp_type="zip" ;;
+            *) echo -e '\033[31mInvalid option.\033[0m'; exit 1 ;;
+        esac
+    fi
 
-    if [ "$opt" == "1" ]; then
+    if [ "$comp_type" == "tar.gz" ]; then
         outname="${dirname}.tar.gz"
         tar -czf "/tmp/$outname" -C "$(dirname "$input")" "$dirname"
-    elif [ "$opt" == "2" ]; then
+    elif [ "$comp_type" == "zip" ]; then
         outname="${dirname}.zip"
         zip -r "/tmp/$outname" "$input" >/dev/null
     else
-        echo -e '\033[31mInvalid option.\033[0m'
+        echo -e '\033[31mInvalid compression type (use tar.gz or zip).\033[0m'
         exit 1
     fi
 

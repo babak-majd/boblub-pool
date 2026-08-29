@@ -7,9 +7,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.2.0
+#   Version   : 1.3.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 set -u
 
@@ -55,6 +55,54 @@ finish_log() {
 }
 trap finish_log EXIT
 
+# ---------- Usage + argument parsing ----------
+# Flags let every prompt be answered up-front for non-interactive runs; any
+# value left unset simply falls back to its interactive prompt further down.
+usage() {
+    cat <<EOF
+Usage: perm-patrol.sh [options] [username]
+
+Patrol a panel user's home: reset ownership, fix web file modes, and harden
+sensitive files. Every option is optional; anything you omit is asked for
+interactively, so the script stays fully usable with no arguments at all.
+
+Options:
+  -u, --user <username>  Target panel username. A bare positional value works too.
+  -n, --dry-run           Show what would change without making any changes.
+  -m, --modes             Fix web file modes (dirs 755 / files 644) without asking.
+  -s, --harden            Harden sensitive files (wp-config.php/.env/etc -> 600)
+                          without asking.
+  -y, --yes               Assume "yes" for every confirmation prompt, including
+                          --modes and --harden.
+  -h, --help              Show this help and exit.
+
+Examples:
+  perm-patrol.sh
+  perm-patrol.sh -u exampleuser -y
+  perm-patrol.sh --user exampleuser --dry-run
+EOF
+}
+
+TARGET_USER=""
+DRY_RUN=0
+DO_MODES=""
+DO_HARDEN=""
+ASSUME_YES=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -u|--user)     [ -n "${2:-}" ] || { echo -e "${RED}✘ $1 requires a value.${RESET}" >&2; exit 1; }; TARGET_USER="$2"; shift 2 ;;
+        -n|--dry-run)  DRY_RUN=1; shift ;;
+        -m|--modes)    DO_MODES="yes"; shift ;;
+        -s|--harden)   DO_HARDEN="yes"; shift ;;
+        -y|--yes)      ASSUME_YES="yes"; DO_MODES="yes"; DO_HARDEN="yes"; shift ;;
+        -h|--help)     usage; exit 0 ;;
+        --)            shift; break ;;
+        -*)            echo -e "${RED}✘ Unknown option: $1${RESET}" >&2; usage; exit 1 ;;
+        *)             TARGET_USER="$1"; shift ;;   # bare positional username
+    esac
+done
+
 # ---------- Header ----------
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -73,12 +121,6 @@ print_header() {
     echo -e "${C}${hr}${N}"
     echo
 }
-
-# ---------- Options ----------
-DRY_RUN=0
-if [[ "${1:-}" == "--dry-run" || "${1:-}" == "-n" ]]; then
-    DRY_RUN=1
-fi
 
 print_header
 
@@ -117,7 +159,9 @@ is_allowed_group() {
 echo -e "Detected Panel: ${CYAN}${PANEL}${RESET}"
 echo
 
-read -rp "Enter username: " TARGET_USER
+if [[ -z "$TARGET_USER" ]]; then
+    read -rp "Enter username: " TARGET_USER
+fi
 
 if [[ -z "$TARGET_USER" ]]; then
     echo -e "${RED}No username entered.${RESET}"
@@ -167,8 +211,10 @@ echo -e "Web Roots      : ${CYAN}${WEB_ROOTS[*]:-none found}${RESET}"
 (( DRY_RUN )) && echo -e "Mode           : ${YELLOW}dry-run (nothing will be changed)${RESET}"
 echo
 
-read -rp "Continue? (y/N): " CONFIRM
-[[ "$CONFIRM" =~ ^[Yy]$ ]] || exit 0
+if [[ "$ASSUME_YES" != "yes" ]]; then
+    read -rp "Continue? (y/N): " CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] || exit 0
+fi
 
 FAILED=0
 
@@ -252,7 +298,11 @@ MODE_FIXED=0
 if (( ${#WEB_ROOTS[@]} == 0 )); then
     echo -e "${YELLOW}[2/3] No web roots found — skipping mode fix.${RESET}"
 else
-    read -rp "[2/3] Fix web file modes (dirs 755 / files 644)? (y/N): " ANS
+    if [[ "$DO_MODES" == "yes" ]]; then
+        ANS="y"
+    else
+        read -rp "[2/3] Fix web file modes (dirs 755 / files 644)? (y/N): " ANS
+    fi
     if [[ "$ANS" =~ ^[Yy]$ ]]; then
         LIST_755="$TMP_DIR/chmod_755"
         LIST_644="$TMP_DIR/chmod_644"
@@ -287,7 +337,11 @@ fi
 echo
 HARD_FIXED=0
 
-read -rp "[3/3] Harden sensitive files (wp-config.php/.env/.my.cnf -> 600)? (y/N): " ANS
+if [[ "$DO_HARDEN" == "yes" ]]; then
+    ANS="y"
+else
+    read -rp "[3/3] Harden sensitive files (wp-config.php/.env/.my.cnf -> 600)? (y/N): " ANS
+fi
 if [[ "$ANS" =~ ^[Yy]$ ]]; then
     LIST_600="$TMP_DIR/chmod_600"
 
