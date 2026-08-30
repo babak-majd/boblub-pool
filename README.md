@@ -4,7 +4,7 @@
 
 **A pool of Bash tools for fixing WordPress and mail servers — fast.**
 
-Six standalone scripts. No dependencies to install, no framework, no config files.
+Seven standalone scripts. No dependencies to install, no framework, no config files.
 You SSH into a broken server, run one command, pick a number from a menu, done.
 
 [![Website](https://img.shields.io/badge/web-bobclub.ir-2ea44f?style=flat-square)](https://bobclub.ir)
@@ -101,9 +101,13 @@ sudo ./wp-core.sh
 sudo ./wp-core.sh -d site.ir --update
 sudo ./wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
 sudo ./wp-core.sh -d site.ir --fresh --version latest -y
+sudo ./wp-core.sh -d site.ir --install --custom-url https://example.com/core.zip -y
+sudo ./wp-core.sh -p /home/u/public_html --install --custom-zip /root/core.zip -y
 ```
 
-Any flag you leave out is simply asked for interactively. Run `./wp-core.sh --help` for the full list.
+`--custom-url`/`--custom-zip` swap the core package for one you supply, instead of resolving a version — handy for a private mirror or a hand-patched core. Either zip layout works: wrapped in a `wordpress/` folder (the wordpress.org default) or flat at the zip root.
+
+Any flag you leave out is simply asked for interactively — pasting a URL or local path at the version prompt is auto-detected too. Run `./wp-core.sh --help` for the full list.
 
 ---
 
@@ -222,7 +226,12 @@ It prints every change it *would* make and exits. Run this first if you're nervo
 
 ```bash
 sudo ./perm-patrol.sh
+# or answer every prompt up-front with flags:
+sudo ./perm-patrol.sh -u exampleuser -y
+sudo ./perm-patrol.sh --user exampleuser --modes --harden --dry-run
 ```
+
+Any flag you leave out is simply asked for interactively. Run `./perm-patrol.sh --help` for the full list.
 
 ---
 
@@ -287,7 +296,12 @@ Run it, and it asks for **one** thing: a file path, a directory, or a URL.
 
 ```bash
 sudo ./thing-to-link.sh
+# or answer every prompt up-front with flags:
+sudo ./thing-to-link.sh -i https://example.com/file.zip
+sudo ./thing-to-link.sh -i /home/user/backups -c zip -w /var/www/html
 ```
+
+Any flag you leave out is simply asked for interactively. Run `./thing-to-link.sh --help` for the full list.
 
 > ⚠️ Whatever you publish is **public to anyone with the link**. Delete it from `/var/www/html` when you're done — especially backups and database dumps.
 

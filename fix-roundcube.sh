@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.1.0
+#   Version   : 1.2.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 # pipefail: a pipeline (e.g. `mysql ... | tee`) now reports the LEFT command's
 # failure instead of tee's success — this is what was masking real DB errors.
@@ -25,6 +25,29 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 RESET='\033[0m'
 BOLD='\033[1m'
+
+# ======== USAGE + ARGUMENT PARSING ========
+usage() {
+    cat <<EOF
+Usage: fix-roundcube.sh [options]
+
+Repair and reconfigure Roundcube webmail: back up and drop the Roundcube
+database, clear a leftover data directory if needed, then rebuild it via
+'da build roundcube'. Fully automatic — it detects the MySQL socket/service
+and reads credentials from DirectAdmin's mysql.conf, so it takes no input.
+
+Options:
+  -h, --help   Show this help and exit.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --)        shift; break ;;
+        *)         echo -e "${RED}✘ Unknown argument: $1${RESET}" >&2; usage; exit 1 ;;
+    esac
+done
 
 # ======== HEADER ========
 print_header() {

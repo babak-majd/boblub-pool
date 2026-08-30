@@ -312,11 +312,11 @@
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.4.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.5.0</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.2.0</span></button>
-            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.2.0</span></button>
-            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.1.0</span></button>
-            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.0.1</span></button>
+            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.0</span></button>
+            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.0</span></button>
+            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.1.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
@@ -329,6 +329,50 @@
                 </ul>
                 <ul class="fa">
                     <li>افزودن یک <strong>مسیر سریع</strong> که تلاش می‌کند کل جست‌وجو را رد کند: افزونهٔ مقصر را مستقیم از خود وردپرس می‌خواند — از متن خطای نمایش‌داده‌شده، از <code>wp-content/debug.log</code> موجود، یا با روشن‌کردن موقت <code>WP_DEBUG_LOG</code> و بارگذاری دوبارهٔ سایت — فقط همان افزونه را غیرفعال می‌کند و دوباره بررسی می‌کند و برای مقصرهای بعدی هم تکرار می‌کند. اگر سایت درست شد، جست‌وجوی خطی/دودویی به‌کلی رد می‌شود؛ اگر نه، هر چیزی که دست‌کاری شده (افزونه‌ها و <code>wp-config.php</code>) به حالت اول برمی‌گردد تا هانت عادی دقیقاً مثل قبل اجرا شود. فقط خطِ مقصرِ یک fatal معتبر شمرده می‌شود، پس یک آدرس assetِ ساده در صفحهٔ سالم هرگز اشتباهی مقصر شناخته نمی‌شود. با <code>--no-fast</code> می‌توان خاموشش کرد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="wp-core" data-date="2026-08-29">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.5.0</span><time datetime="2026-08-29">2026-08-29</time>
+                </div>
+                <ul class="en">
+                    <li>Added <code>-z/--custom-url &lt;url&gt;</code> and <code>-Z/--custom-zip &lt;path&gt;</code> so the WordPress core package can come from an operator-supplied source instead of a resolved version — works with <code>--install</code> and <code>--fresh</code>, and via the interactive prompts too (pasting a URL or local path is auto-detected). Extraction now stages the zip in a temp directory first and normalizes both layouts — wrapped in a <code>wordpress/</code> folder (the wordpress.org layout) or flat at the zip root — into <code>./wordpress</code> before the rest of the script runs.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن <code>-z/--custom-url &lt;url&gt;</code> و <code>-Z/--custom-zip &lt;path&gt;</code> تا بستهٔ هستهٔ وردپرس بتواند از یک منبع دلخواه اپراتور بیاید، نه فقط از یک نسخهٔ مشخص — هم با <code>--install</code> و <code>--fresh</code> کار می‌کند، هم در پرامپت‌های تعاملی (اگر لینک یا مسیر فایل را پیست کنید خودش تشخیص می‌دهد). استخراج حالا اول فایل زیپ را در یک پوشهٔ موقت باز می‌کند و هر دو ساختار — پوشه‌بندی‌شده در <code>wordpress/</code> (چیدمان wordpress.org) یا فلت در ریشهٔ زیپ — را پیش از ادامهٔ اسکریپت به <code>./wordpress</code> یکسان‌سازی می‌کند.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="thing-to-link" data-date="2026-08-29">
+                <div class="entry-head"><span class="script-tag" data-script="thing-to-link">thing-to-link.sh</span><span class="ver">1.1.0</span><time datetime="2026-08-29">2026-08-29</time>
+                </div>
+                <ul class="en">
+                    <li>Added command-line flags so every prompt can be answered up-front: <code>-i/--input &lt;path|url&gt;</code> (or a bare positional value), <code>-w/--webroot &lt;dir&gt;</code> (previously hardcoded to <code>/var/www/html</code>), <code>-c/--compress &lt;tar.gz|zip&gt;</code> for a directory input, and <code>-h/--help</code>. Omitting any still falls back to the interactive prompt.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن پرچم‌های خط فرمان تا بتوان همهٔ ورودی‌ها را مستقیم داد: <code>-i/--input &lt;path|url&gt;</code> (یا یک مقدار پوزیشنال ساده)، <code>-w/--webroot &lt;dir&gt;</code> (پیش‌تر به‌صورت ثابت <code>/var/www/html</code> بود)، <code>-c/--compress &lt;tar.gz|zip&gt;</code> برای ورودی پوشه، و <code>-h/--help</code>. هر ورودی‌ای که داده نشود، همچنان به‌صورت تعاملی پرسیده می‌شود.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="fix-roundcube" data-date="2026-08-29">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.2.0</span><time datetime="2026-08-29">2026-08-29</time>
+                </div>
+                <ul class="en">
+                    <li>Added <code>-h/--help</code> and a usage message, matching the rest of the pool. The script itself is unchanged — it's still fully automatic with no input to parametrize.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن <code>-h/--help</code> و پیام راهنما، هم‌راستا با بقیهٔ اسکریپت‌های مجموعه. خود اسکریپت تغییری نکرده — همچنان کاملاً خودکار است و ورودی‌ای برای پارامتر کردن ندارد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="perm-patrol" data-date="2026-08-29">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.3.0</span><time datetime="2026-08-29">2026-08-29</time>
+                </div>
+                <ul class="en">
+                    <li>Added command-line flags so every prompt can be answered up-front: <code>-u/--user &lt;name&gt;</code> (or a bare positional username), <code>-n/--dry-run</code>, <code>-m/--modes</code> and <code>-s/--harden</code> (skip their respective yes/no prompts), <code>-y/--yes</code> (answers yes to everything, including modes and harden), and <code>-h/--help</code>. Omitting any still falls back to the interactive prompt.</li>
+                </ul>
+                <ul class="fa">
+                    <li>افزودن پرچم‌های خط فرمان تا بتوان همهٔ ورودی‌ها را مستقیم داد: <code>-u/--user &lt;name&gt;</code> (یا یک یوزرنیم پوزیشنال ساده)، <code>-n/--dry-run</code>، <code>-m/--modes</code> و <code>-s/--harden</code> (رد کردن پرسش‌های بله/خیر مربوطه)، <code>-y/--yes</code> (پاسخ بله به همه‌چیز، شامل modes و harden) و <code>-h/--help</code>. هر ورودی‌ای که داده نشود، همچنان به‌صورت تعاملی پرسیده می‌شود.</li>
                 </ul>
             </article>
 

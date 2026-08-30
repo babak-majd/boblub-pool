@@ -4,7 +4,7 @@
 
 **مجموعه‌ای از ابزارهای Bash برای تعمیر سریع وردپرس و سرورهای ایمیل.**
 
-شش اسکریپت مستقل. بدون نیاز به نصب چیزی، بدون فریم‌ورک، بدون فایل کانفیگ.
+هفت اسکریپت مستقل. بدون نیاز به نصب چیزی، بدون فریم‌ورک، بدون فایل کانفیگ.
 با SSH وارد سرور خراب می‌شوید، یک دستور اجرا می‌کنید، از منو یک عدد انتخاب می‌کنید، تمام.
 
 [![Website](https://img.shields.io/badge/web-bobclub.ir-2ea44f?style=flat-square)](https://bobclub.ir)
@@ -101,9 +101,13 @@ sudo ./wp-core.sh
 sudo ./wp-core.sh -d site.ir --update
 sudo ./wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
 sudo ./wp-core.sh -d site.ir --fresh --version latest -y
+sudo ./wp-core.sh -d site.ir --install --custom-url https://example.com/core.zip -y
+sudo ./wp-core.sh -p /home/u/public_html --install --custom-zip /root/core.zip -y
 ```
 
-هر پرچمی که ندهید، همان به‌صورت تعاملی از شما پرسیده می‌شود. برای دیدن فهرست کامل `./wp-core.sh --help` را اجرا کنید.
+با `--custom-url`/`--custom-zip` می‌توانید به‌جای انتخاب نسخه، بستهٔ هستهٔ دلخواه خودتان را بدهید — برای یک mirror اختصاصی یا هستهٔ دستی‌پچ‌شده به کار می‌آید. هر دو چیدمان زیپ کار می‌کند: پوشه‌بندی‌شده در `wordpress/` (پیش‌فرض wordpress.org) یا فلت در ریشهٔ زیپ.
+
+هر پرچمی که ندهید، همان به‌صورت تعاملی از شما پرسیده می‌شود — اگر در پرامپت نسخه یک لینک یا مسیر فایل پیست کنید، خودش تشخیص می‌دهد. برای دیدن فهرست کامل `./wp-core.sh --help` را اجرا کنید.
 
 ---
 
@@ -222,7 +226,12 @@ sudo ./perm-patrol.sh --dry-run
 
 ```bash
 sudo ./perm-patrol.sh
+# یا با پرچم‌ها همهٔ ورودی‌ها را از اول بدهید:
+sudo ./perm-patrol.sh -u exampleuser -y
+sudo ./perm-patrol.sh --user exampleuser --modes --harden --dry-run
 ```
+
+هر پرچمی که ندهید، همان به‌صورت تعاملی از شما پرسیده می‌شود. برای دیدن فهرست کامل `./perm-patrol.sh --help` را اجرا کنید.
 
 ---
 
@@ -287,7 +296,12 @@ sudo ./fix-roundcube.sh
 
 ```bash
 sudo ./thing-to-link.sh
+# یا با پرچم‌ها همهٔ ورودی‌ها را از اول بدهید:
+sudo ./thing-to-link.sh -i https://example.com/file.zip
+sudo ./thing-to-link.sh -i /home/user/backups -c zip -w /var/www/html
 ```
+
+هر پرچمی که ندهید، همان به‌صورت تعاملی از شما پرسیده می‌شود. برای دیدن فهرست کامل `./thing-to-link.sh --help` را اجرا کنید.
 
 > ⚠️ هر چیزی که منتشر می‌کنید **برای هر کسی که لینک را داشته باشد عمومی است.** بعد از اینکه کارتان تمام شد، از `/var/www/html` پاکش کنید — مخصوصاً بکاپ‌ها و فایل‌های دیتابیس.
 
