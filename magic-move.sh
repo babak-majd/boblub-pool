@@ -8,9 +8,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.3.0
+#   Version   : 2.4.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.3.0"
+VERSION="2.4.0"
 
 set -u
 
@@ -73,6 +73,8 @@ PANEL=""                      # cpanel | directadmin — auto-detected / forced
 SERVER_IP=""                  # this server's IP; auto-detected default, prompted
 RESELLER=""                   # source: only accounts owned by this reseller
 USERS=""                      # source: only these specific users (space/comma)
+NS_LOOKUP=""                  # source: yes = also record each domain's ns1-ns4
+                              # in the CSV. Empty means neither flag: ask.
 LIST_ONLY=""                  # source: yes = extract the account list only (no
                               # requests, no snapshots); no = full health check.
                               # Empty means neither flag was given: ask.
@@ -100,7 +102,8 @@ A migration is verified in two passes:
                   domain, and record it as status_before in $OUT_CSV. Snapshots
                   each page to $SNAP_DIR/before/<domain>.html. No changes made.
                   With --list-only it stops after the account list: no requests,
-                  no snapshots, just user,domain in the CSV.
+                  no snapshots, just user,domain in the CSV. With --ns it also
+                  looks up each domain's nameservers into ns1..ns4 columns.
   2. DESTINATION  Take that CSV, re-check every domain against THIS server, and
                   heal any broken site. For a plugin fatal it turns on WP_DEBUG,
                   reads the culprit plugin from the error and disables it (renames
@@ -127,6 +130,10 @@ Options:
                           --snapshot is given)
       --snapshot          SOURCE: full pass — health-check every domain and save
                           a page snapshot. (implies --source)
+      --ns                SOURCE: look up each domain's nameservers and add
+                          ns1,ns2,ns3,ns4 columns to the CSV. Asked for when
+                          neither this nor --no-ns is given.
+      --no-ns             SOURCE: do not look up nameservers (no CSV columns).
   -o, --outdir <dir>      Output folder for migration.csv + snapshots/.
                           (default: magic-move-source / magic-move-dest)
   -p, --php-versions <v>  DESTINATION: cascade to try, in order. (default: "$PHP_VERSIONS")
@@ -144,7 +151,7 @@ Options:
 Examples:
   magic-move.sh --source
   magic-move.sh --source -r bob
-  magic-move.sh --source --list-only
+  magic-move.sh --source --list-only --ns
   magic-move.sh --source --snapshot -u "bobuser, shopuser"
   magic-move.sh --destination -f migration.csv
   magic-move.sh --destination -f https://host/migration.csv --dry-run
@@ -171,6 +178,8 @@ while [ $# -gt 0 ]; do
             USERS="$2"; shift 2 ;;
         --list-only)     LIST_ONLY="yes"; shift ;;
         --snapshot)      LIST_ONLY="no"; shift ;;
+        --ns)            NS_LOOKUP="yes"; shift ;;
+        --no-ns)         NS_LOOKUP="no"; shift ;;
         -o|--outdir)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             OUT_DIR="$2"; shift 2 ;;
@@ -213,9 +222,9 @@ print_header
 
 # ---------- Prompt: Mode ----------
 # The whole run hinges on this: the source only records, the destination heals.
-# --list-only / --snapshot describe the source pass, so either one settles the
-# mode too — asking again would be asking something already answered.
-[ -z "$MODE" ] && [ -n "$LIST_ONLY" ] && MODE="source"
+# --list-only / --snapshot / --ns describe the source pass, so any of them
+# settles the mode too — asking again would be asking something already answered.
+[ -z "$MODE" ] && { [ -n "$LIST_ONLY" ] || [ -n "$NS_LOOKUP" ]; } && MODE="source"
 if [ -z "$MODE" ]; then
     echo -e "${CYAN}Is this the source or the destination server?${RESET}"
     echo "  1) source       — read this server's accounts (list only, or full snapshot)"
@@ -234,6 +243,10 @@ info "Mode: $MODE"
 # through. Without either, ask — the two do very different amounts of work.
 if [ "$MODE" = "destination" ] && [ "$LIST_ONLY" = "yes" ]; then
     error "--list-only describes the source pass; it has no meaning with --destination."
+    exit 1
+fi
+if [ "$MODE" = "destination" ] && [ "$NS_LOOKUP" = "yes" ]; then
+    error "--ns describes the source pass; the destination carries the columns through unchanged."
     exit 1
 fi
 if [ "$MODE" = "source" ] && [ -z "$LIST_ONLY" ]; then
@@ -290,6 +303,56 @@ if [ "$LIST_ONLY" != "yes" ]; then
         [ -n "$SERVER_IP" ] || { error "No server IP given."; exit 1; }
     fi
     info "Server IP: $SERVER_IP"
+fi
+
+# ---------- Nameserver Lookup (source) ----------
+# The delegated nameservers say whether a domain has actually been repointed, so
+# recording them next to the status turns the CSV into a to-do list for the DNS
+# side of the move. Answers are sorted, so the same names land in the same
+# columns on both passes and the two CSVs can be diffed field by field.
+NS_TOOL=""
+detect_ns_tool() {      # sets NS_TOOL — must be called plainly, not in $( )
+    local t
+    for t in dig host nslookup; do
+        command -v "$t" >/dev/null 2>&1 && { NS_TOOL="$t"; return 0; }
+    done
+    return 1
+}
+
+ns_query() {    # $1 = name -> one bare, lowercase nameserver per line
+    case "$NS_TOOL" in
+        dig)      dig +short +time=3 +tries=1 NS "$1" 2>/dev/null ;;
+        host)     host -W 3 -t NS "$1" 2>/dev/null | awk '/name server/{print $NF}' ;;
+        nslookup) nslookup -type=ns -timeout=3 "$1" 2>/dev/null | awk '/nameserver = /{print $NF}' ;;
+    esac | tr -d '\r' | tr 'A-Z' 'a-z' | sed 's/\.$//' | grep -E '^[a-z0-9][a-z0-9.-]*$' | sort -u
+}
+
+# An addon domain or subdomain has no NS record of its own, so fall back one
+# label up to the zone that actually holds the delegation.
+lookup_ns() {   # $1 = domain -> sets NS_CSV to exactly four comma-separated fields
+    local d="$1" out
+    out=$(ns_query "$d")
+    if [ -z "$out" ] && [ "$(printf '%s' "$d" | tr -cd '.' | wc -c)" -ge 2 ]; then
+        out=$(ns_query "${d#*.}")
+    fi
+    NS_CSV=$(printf '%s\n' "$out" | grep . | head -n 4 |
+             awk '{a[NR]=$0} END{printf "%s,%s,%s,%s", a[1], a[2], a[3], a[4]}')
+}
+
+# ---------- Prompt: Nameservers ----------
+# Optional because it costs a DNS query per domain and needs a resolver tool;
+# --ns / --no-ns answer it up front.
+if [ "$MODE" = "source" ] && [ -z "$NS_LOOKUP" ]; then
+    read -r -p "Also record each domain's nameservers (ns1-ns4) in the CSV? [y/N]: " NS_CHOICE
+    case "$NS_CHOICE" in [Yy]*) NS_LOOKUP="yes" ;; *) NS_LOOKUP="no" ;; esac
+fi
+if [ "$NS_LOOKUP" = "yes" ]; then
+    if ! detect_ns_tool; then
+        error "No dig, host or nslookup found — cannot look up nameservers."
+        info "Install bind-utils (dnsutils), or re-run with --no-ns."
+        exit 1
+    fi
+    info "Nameservers: recorded as ns1-ns4 (via $NS_TOOL)"
 fi
 
 # ---------- Account Detection (source) ----------
@@ -654,7 +717,9 @@ run_source() {
     total=$(printf '%s\n' "$rows" | grep -c .)
     [ "$LIST_ONLY" = "yes" ] || mkdir -p "$SNAP_DIR/before"
     : > "$OUT_CSV"
-    echo "user,domain,status_before,status_after" >> "$OUT_CSV"
+    local csv_header="user,domain,status_before,status_after"
+    [ "$NS_LOOKUP" = "yes" ] && csv_header="$csv_header,ns1,ns2,ns3,ns4"
+    echo "$csv_header" >> "$OUT_CSV"
     if [ "$LIST_ONLY" = "yes" ]; then
         info "Accounts found: $total"
     else
@@ -662,17 +727,25 @@ run_source() {
     fi
     echo
 
-    local owner user domain
+    local owner user domain NS_CSV="" ns1
     while IFS=$'\t' read -r owner user domain; do
         [ -z "$domain" ] && continue
         i=$((i+1))
+        # Looked up once per domain, then appended to whichever row is written
+        # below; NS_CSV is empty when the feature is off, so no columns are added.
+        [ "$NS_LOOKUP" = "yes" ] && lookup_ns "$domain"
         # List-only: the account list is the whole deliverable. status_before is
         # left empty — the CSV still feeds the destination pass, that pass just
         # has no "before" to compare its result against.
         if [ "$LIST_ONLY" = "yes" ]; then
-            printf '[%3d/%3d] %-20s %s\n' "$i" "$total" "$user" "$domain"
-            echo "$user,$domain,," >> "$OUT_CSV"
-            log "SOURCE $domain (user=$user) listed"
+            if [ "$NS_LOOKUP" = "yes" ]; then
+                ns1="${NS_CSV%%,*}"
+                printf '[%3d/%3d] %-20s %-32s %s\n' "$i" "$total" "$user" "$domain" "${ns1:--}"
+            else
+                printf '[%3d/%3d] %-20s %s\n' "$i" "$total" "$user" "$domain"
+            fi
+            echo "$user,$domain,,${NS_CSV:+,$NS_CSV}" >> "$OUT_CSV"
+            log "SOURCE $domain (user=$user) listed${NS_CSV:+ ns=$NS_CSV}"
             continue
         fi
         printf '[%3d/%3d] %-35s' "$i" "$total" "$domain"
@@ -683,8 +756,8 @@ run_source() {
             printf ' -> %b%s%b' "$YELLOW" "$H_STATUS" "$RESET"; fail=$((fail+1))
         fi
         echo
-        echo "$user,$domain,$H_STATUS," >> "$OUT_CSV"
-        log "SOURCE $domain (user=$user) $H_STATUS"
+        echo "$user,$domain,$H_STATUS,${NS_CSV:+,$NS_CSV}" >> "$OUT_CSV"
+        log "SOURCE $domain (user=$user) $H_STATUS${NS_CSV:+ ns=$NS_CSV}"
     done <<< "$rows"
 
     local dur; dur=$(fmt_duration $((SECONDS-start)))
@@ -756,14 +829,18 @@ run_destination() {
     [ -n "$DRY_RUN" ] && info "Dry-run: PHP versions will NOT be changed."
 
     # Read the source CSV fully first, so we can safely rewrite it in place.
-    local U=() D=() SB=()
-    local user domain sbefore _rest
-    while IFS=, read -r user domain sbefore _rest; do
+    # Anything past status_after (the ns1-ns4 columns) is kept verbatim and
+    # written back out: it belongs to the source pass, not to this one.
+    local U=() D=() SB=() EX=()
+    local user domain sbefore _safter extra
+    local csv_header; csv_header=$(head -n1 "$CSV_IN")
+    case "$csv_header" in user,domain,*) ;; *) csv_header="user,domain,status_before,status_after" ;; esac
+    while IFS=, read -r user domain sbefore _safter extra; do
         user="${user//[[:space:]]/}"; domain="${domain//[[:space:]]/}"
         [ -z "$domain" ] && continue
         [ "$user" = "user" ] && continue          # header
         case "$user" in \#*) continue ;; esac
-        U+=("$user"); D+=("$domain"); SB+=("$sbefore")
+        U+=("$user"); D+=("$domain"); SB+=("$sbefore"); EX+=("$extra")
     done < "$CSV_IN"
 
     [ -f "$tmp" ] && rm -f "$tmp"
@@ -771,13 +848,13 @@ run_destination() {
     local total=${#D[@]} i=0 okc=0 fixedc=0 failc=0 regress=0 bfail=0 plugc=0 start=$SECONDS
     mkdir -p "$SNAP_DIR/after"
     local out_tmp; out_tmp=$(mktemp)
-    echo "user,domain,status_before,status_after" >> "$out_tmp"
+    echo "$csv_header" >> "$out_tmp"
     info "Accounts to verify: $total"
     echo
 
     local snap sa orig ver before_status DISABLED_PLUGINS
     for ((idx=0; idx<total; idx++)); do
-        user="${U[$idx]}"; domain="${D[$idx]}"; before_status="${SB[$idx]}"
+        user="${U[$idx]}"; domain="${D[$idx]}"; before_status="${SB[$idx]}"; extra="${EX[$idx]}"
         i=$((i+1))
         snap=$(snap_path after "$domain")
         DISABLED_PLUGINS=""          # reset per account so counts never carry over
@@ -848,7 +925,7 @@ run_destination() {
             "OK "*) fixedc=$((fixedc+1)); okc=$((okc+1)) ;;
             *) failc=$((failc+1)); [ "$before_status" = "OK" ] && regress=$((regress+1)) ;;
         esac
-        echo "$user,$domain,$before_status,$sa" >> "$out_tmp"
+        echo "$user,$domain,$before_status,$sa${extra:+,$extra}" >> "$out_tmp"
     done
 
     mv "$out_tmp" "$OUT_CSV"
