@@ -8,9 +8,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.2.0
+#   Version   : 2.3.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.2.0"
+VERSION="2.3.0"
 
 set -u
 
@@ -73,6 +73,9 @@ PANEL=""                      # cpanel | directadmin — auto-detected / forced
 SERVER_IP=""                  # this server's IP; auto-detected default, prompted
 RESELLER=""                   # source: only accounts owned by this reseller
 USERS=""                      # source: only these specific users (space/comma)
+LIST_ONLY=""                  # source: yes = extract the account list only (no
+                              # requests, no snapshots); no = full health check.
+                              # Empty means neither flag was given: ask.
 CSV_IN=""                     # destination: the CSV produced on the source
 OUT_DIR=""                    # output folder (default: magic-move-<mode>); holds
                               # migration.csv + snapshots/ together
@@ -96,6 +99,8 @@ A migration is verified in two passes:
   1. SOURCE       Detect every account (cPanel/DirectAdmin), health-check each
                   domain, and record it as status_before in $OUT_CSV. Snapshots
                   each page to $SNAP_DIR/before/<domain>.html. No changes made.
+                  With --list-only it stops after the account list: no requests,
+                  no snapshots, just user,domain in the CSV.
   2. DESTINATION  Take that CSV, re-check every domain against THIS server, and
                   heal any broken site. For a plugin fatal it turns on WP_DEBUG,
                   reads the culprit plugin from the error and disables it (renames
@@ -116,6 +121,12 @@ Options:
                           auto-detecting accounts.
   -r, --reseller <name>   SOURCE: only accounts owned by this reseller.
   -u, --users <list>      SOURCE: only these users (space/comma separated).
+      --list-only         SOURCE: extract the account list only — no health
+                          checks, no page snapshots, no server IP needed.
+                          (implies --source; asked for when neither this nor
+                          --snapshot is given)
+      --snapshot          SOURCE: full pass — health-check every domain and save
+                          a page snapshot. (implies --source)
   -o, --outdir <dir>      Output folder for migration.csv + snapshots/.
                           (default: magic-move-source / magic-move-dest)
   -p, --php-versions <v>  DESTINATION: cascade to try, in order. (default: "$PHP_VERSIONS")
@@ -133,6 +144,8 @@ Options:
 Examples:
   magic-move.sh --source
   magic-move.sh --source -r bob
+  magic-move.sh --source --list-only
+  magic-move.sh --source --snapshot -u "bobuser, shopuser"
   magic-move.sh --destination -f migration.csv
   magic-move.sh --destination -f https://host/migration.csv --dry-run
   magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
@@ -156,6 +169,8 @@ while [ $# -gt 0 ]; do
         -u|--users)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             USERS="$2"; shift 2 ;;
+        --list-only)     LIST_ONLY="yes"; shift ;;
+        --snapshot)      LIST_ONLY="no"; shift ;;
         -o|--outdir)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             OUT_DIR="$2"; shift 2 ;;
@@ -198,9 +213,12 @@ print_header
 
 # ---------- Prompt: Mode ----------
 # The whole run hinges on this: the source only records, the destination heals.
+# --list-only / --snapshot describe the source pass, so either one settles the
+# mode too — asking again would be asking something already answered.
+[ -z "$MODE" ] && [ -n "$LIST_ONLY" ] && MODE="source"
 if [ -z "$MODE" ]; then
     echo -e "${CYAN}Is this the source or the destination server?${RESET}"
-    echo "  1) source       — snapshot every account's status (no changes)"
+    echo "  1) source       — read this server's accounts (list only, or full snapshot)"
     echo "  2) destination  — re-check and heal broken PHP sites"
     read -r -p "Enter choice (1 or 2): " MODE_CHOICE
     case "$MODE_CHOICE" in
@@ -210,6 +228,26 @@ if [ -z "$MODE" ]; then
     esac
 fi
 info "Mode: $MODE"
+
+# ---------- Prompt: Source Scope ----------
+# A flag is a decision already made: --list-only / --snapshot go straight
+# through. Without either, ask — the two do very different amounts of work.
+if [ "$MODE" = "destination" ] && [ "$LIST_ONLY" = "yes" ]; then
+    error "--list-only describes the source pass; it has no meaning with --destination."
+    exit 1
+fi
+if [ "$MODE" = "source" ] && [ -z "$LIST_ONLY" ]; then
+    echo -e "${CYAN}What should the source pass do?${RESET}"
+    echo "  1) full pass   — health-check every domain and snapshot each page"
+    echo "  2) list only   — just extract the account list (no requests, no snapshots)"
+    read -r -p "Enter choice (1 or 2) [1]: " SRC_CHOICE
+    case "${SRC_CHOICE:-1}" in
+        1) LIST_ONLY="no" ;;
+        2) LIST_ONLY="yes" ;;
+        *) error "Invalid choice."; exit 1 ;;
+    esac
+fi
+[ "$LIST_ONLY" = "yes" ] && info "Scope: account list only (no health checks)"
 
 # ---------- Output Layout ----------
 # One folder holds the whole job, so it can be copied (or zipped) between servers
@@ -239,17 +277,20 @@ detect_server_ip() {
 }
 
 # ---------- Prompt: Server IP ----------
-if [ -z "$SERVER_IP" ]; then
-    DETECTED_IP=$(detect_server_ip)
-    if [ -n "$DETECTED_IP" ]; then
-        read -r -p "Server IP [$DETECTED_IP]: " SERVER_IP
-        SERVER_IP="${SERVER_IP:-$DETECTED_IP}"
-    else
-        read -r -p "Server IP (auto-detect failed, enter manually): " SERVER_IP
+# Nothing is fetched in list-only mode, so the IP is neither needed nor asked for.
+if [ "$LIST_ONLY" != "yes" ]; then
+    if [ -z "$SERVER_IP" ]; then
+        DETECTED_IP=$(detect_server_ip)
+        if [ -n "$DETECTED_IP" ]; then
+            read -r -p "Server IP [$DETECTED_IP]: " SERVER_IP
+            SERVER_IP="${SERVER_IP:-$DETECTED_IP}"
+        else
+            read -r -p "Server IP (auto-detect failed, enter manually): " SERVER_IP
+        fi
+        [ -n "$SERVER_IP" ] || { error "No server IP given."; exit 1; }
     fi
-    [ -n "$SERVER_IP" ] || { error "No server IP given."; exit 1; }
+    info "Server IP: $SERVER_IP"
 fi
-info "Server IP: $SERVER_IP"
 
 # ---------- Account Detection (source) ----------
 # One file/dir per account holds both the account's main domain and its owner
@@ -562,7 +603,7 @@ run_source() {
     # (-u / -r) skip the prompt for non-interactive runs.
     if [ -n "$CSV_IN" ]; then
         [ -f "$CSV_IN" ] || { error "List not found: $CSV_IN"; exit 1; }
-        rows=$(awk -F, 'NF>=2 && $1!~/^#/ && $1!="" {print "?\t"$1"\t"$2}' "$CSV_IN")
+        rows=$(awk -F, 'NF>=2 && $1!~/^#/ && $1!="" && $1!="user" {print "?\t"$1"\t"$2}' "$CSV_IN")
     else
         [ -n "$PANEL" ] || detect_panel || { error "No cPanel/DirectAdmin found. Use --cpanel/--directadmin or -f."; exit 1; }
         info "Detecting accounts via: $PANEL"
@@ -578,7 +619,7 @@ run_source() {
         else
             local total_all
             total_all=$(printf '%s\n' "$rows" | grep -c .)
-            echo -e "${CYAN}Which accounts do you want to snapshot?${RESET}"
+            echo -e "${CYAN}Which accounts do you want to include?${RESET}"
             echo "  1) all accounts ($total_all)"
             echo "  2) specific users"
             echo "  3) a reseller's accounts"
@@ -611,16 +652,29 @@ run_source() {
 
     local total i=0 ok=0 fail=0 start=$SECONDS
     total=$(printf '%s\n' "$rows" | grep -c .)
-    mkdir -p "$SNAP_DIR/before"
+    [ "$LIST_ONLY" = "yes" ] || mkdir -p "$SNAP_DIR/before"
     : > "$OUT_CSV"
     echo "user,domain,status_before,status_after" >> "$OUT_CSV"
-    info "Accounts to snapshot: $total"
+    if [ "$LIST_ONLY" = "yes" ]; then
+        info "Accounts found: $total"
+    else
+        info "Accounts to snapshot: $total"
+    fi
     echo
 
     local owner user domain
     while IFS=$'\t' read -r owner user domain; do
         [ -z "$domain" ] && continue
         i=$((i+1))
+        # List-only: the account list is the whole deliverable. status_before is
+        # left empty — the CSV still feeds the destination pass, that pass just
+        # has no "before" to compare its result against.
+        if [ "$LIST_ONLY" = "yes" ]; then
+            printf '[%3d/%3d] %-20s %s\n' "$i" "$total" "$user" "$domain"
+            echo "$user,$domain,," >> "$OUT_CSV"
+            log "SOURCE $domain (user=$user) listed"
+            continue
+        fi
         printf '[%3d/%3d] %-35s' "$i" "$total" "$domain"
         health "$domain" "$(snap_path before "$domain")"
         if [ "$H_STATUS" = "OK" ]; then
@@ -639,14 +693,32 @@ run_source() {
     {
         echo "Magic Move — SOURCE report"
         echo "Date       : $(date +'%F %T')"
-        echo "Server IP  : $SERVER_IP"
+        if [ "$LIST_ONLY" = "yes" ]; then
+            echo "Pass       : list only (accounts extracted; no health checks)"
+        else
+            echo "Server IP  : $SERVER_IP"
+        fi
         echo "Panel      : ${PANEL:-list}"
         [ -n "$RESELLER" ] && echo "Reseller   : $RESELLER"
         echo "Accounts   : $i"
-        echo "Healthy    : $ok"
-        echo "Problems   : $fail"
+        if [ "$LIST_ONLY" != "yes" ]; then
+            echo "Healthy    : $ok"
+            echo "Problems   : $fail"
+        fi
         echo "Duration   : $dur"
     } > "$REPORT_FILE"
+
+    if [ "$LIST_ONLY" = "yes" ]; then
+        echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
+        echo -e "  Account list written : $OUT_CSV"
+        echo -e "  Report               : $REPORT_FILE"
+        echo -e "  Accounts             : $i"
+        echo -e "  Duration             : $dur"
+        echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
+        echo -e "  Health-check these accounts later with:  magic-move.sh --source --snapshot"
+        log "SOURCE list-only done: $i accounts, ${dur} -> $OUT_CSV"
+        return 0
+    fi
 
     echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
     echo -e "  Source snapshot written : $OUT_CSV"
