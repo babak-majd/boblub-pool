@@ -242,6 +242,8 @@ Any flag you leave out is simply asked for interactively. Run `./perm-patrol.sh 
 Every domain is probed with **all hostnames pinned to the server being tested**, so a redirect to `www`/a subdomain follows onto that box, not wherever public DNS still points.
 
 1. **SOURCE** — detects every account (cPanel/DirectAdmin), health-checks each domain, records `status_before` in `migration.csv`, and snapshots each page to `snapshots/before/`. Changes nothing.
+   - **How much to do**: `--list-only` stops right after the account list — no requests, no snapshots, and no server-IP prompt, since nothing is fetched. `--snapshot` runs the full pass. Given neither, it asks which one; either flag on its own already means `--source`, so a flagged run asks nothing.
+   - **Nameservers**: `--ns` looks up each domain's delegated nameservers into four extra columns, `ns1`–`ns4` (`--no-ns` skips it; given neither, it asks). An addon domain or subdomain falls back to the zone one label up, and the destination pass carries the columns through untouched — so one CSV holds both the migration status and where DNS still points.
 2. **DESTINATION** — takes that CSV, re-checks every domain against *this* server, and **heals** anything broken:
    - **Plugin fatal** (the WordPress "critical error" white screen): turns on `WP_DEBUG` + `WP_DEBUG_DISPLAY` just long enough to read the culprit plugin from the error, disables it by renaming its folder to `<slug>.dis`, and repeats for any further culprit — then restores `wp-config.php`. **Elementor and WooCommerce are never disabled** (extend the list with `--protect`).
    - **Otherwise** it steps the PHP version down the cascade until the site comes back.
@@ -250,6 +252,7 @@ Every domain is probed with **all hostnames pinned to the server being tested**,
 
 ```bash
 sudo ./magic-move.sh --source
+sudo ./magic-move.sh --source --list-only --ns                          # just the account list + nameservers
 sudo ./magic-move.sh --destination -f migration.csv
 sudo ./magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
 sudo ./magic-move.sh --destination -f migration.csv --no-plugin-heal   # PHP-only healing

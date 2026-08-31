@@ -313,13 +313,36 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.5.0</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.2.0</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.4.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.0</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.0</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.1.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-09-01 ============ -->
+            <article class="entry" data-script="magic-move" data-date="2026-09-01">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.4.0</span><time datetime="2026-09-01">2026-09-01</time>
+                </div>
+                <ul class="en">
+                    <li>The SOURCE pass can now record each domain's <strong>delegated nameservers</strong> in four new CSV columns, <code>ns1</code>–<code>ns4</code>. Answers are sorted, so the same names always land in the same columns and two CSVs can be diffed field by field; a domain with no delegation of its own (an addon domain or subdomain) falls back to the zone one label up. Optional: <code>--ns</code> turns it on, <code>--no-ns</code> off, and with neither flag the source pass asks. Uses <code>dig</code>, falling back to <code>host</code> / <code>nslookup</code>. The DESTINATION pass carries the columns through untouched when it rewrites the CSV, so one file holds both the migration status and where DNS still points.</li>
+                </ul>
+                <ul class="fa">
+                    <li>پاس مبدأ حالا می‌تواند <strong>نیم‌سرورهای هر دامنه</strong> را در چهار ستون جدید CSV یعنی <code>ns1</code> تا <code>ns4</code> ثبت کند. پاسخ‌ها مرتب می‌شوند تا همیشه نام‌های یکسان در ستون‌های یکسان بیفتند و بشود دو CSV را فیلد‌به‌فیلد مقایسه کرد؛ دامنه‌ای که رکورد NS مستقل ندارد (دامنهٔ افزوده یا ساب‌دامنه) به زون یک سطح بالاتر برمی‌گردد. اختیاری است: <code>--ns</code> روشن، <code>--no-ns</code> خاموش، و اگر هیچ‌کدام نیاید پاس مبدأ می‌پرسد. از <code>dig</code> استفاده می‌کند و در نبودش به <code>host</code> / <code>nslookup</code> برمی‌گردد. پاس مقصد هنگام بازنویسی CSV این ستون‌ها را دست‌نخورده منتقل می‌کند، پس یک فایل هم وضعیت مهاجرت را نگه می‌دارد هم اینکه DNS هنوز کجا را نشان می‌دهد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="magic-move" data-date="2026-09-01">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.3.0</span><time datetime="2026-09-01">2026-09-01</time>
+                </div>
+                <ul class="en">
+                    <li>The SOURCE pass can now stop at the account list. <code>--list-only</code> extracts every account (user + domain) into <code>migration.csv</code> and does nothing else — no HTTP requests, no page snapshots, and no server-IP prompt, since nothing is fetched; <code>--snapshot</code> asks for the full pass explicitly. With neither flag the source pass asks which of the two to run (default: the full pass), and either flag on its own already implies <code>--source</code>, so a flagged run asks nothing at all. A list-only CSV leaves <code>status_before</code> empty and the DESTINATION pass still reads it. Also fixed: <code>--source -f &lt;csv&gt;</code> no longer treats a <code>user,domain</code> header row as an account, so a <code>migration.csv</code> can be fed straight back in as an account list.</li>
+                </ul>
+                <ul class="fa">
+                    <li>پاس مبدأ حالا می‌تواند در همان لیست اکانت‌ها متوقف شود. <code>--list-only</code> همهٔ اکانت‌ها (کاربر + دامنه) را در <code>migration.csv</code> استخراج می‌کند و کار دیگری نمی‌کند — بدون درخواست HTTP، بدون اسنپ‌شات صفحه و بدون پرسیدن IP سرور، چون چیزی fetch نمی‌شود؛ <code>--snapshot</code> هم صریحاً پاس کامل را می‌خواهد. اگر هیچ‌کدام نیاید، پاس مبدأ می‌پرسد کدام‌یک اجرا شود (پیش‌فرض: پاس کامل)، و هر کدام از این دو فلگ به‌تنهایی یعنی <code>--source</code>؛ پس اجرای فلگ‌دار اصلاً سؤالی نمی‌پرسد. در CSV حالت list-only مقدار <code>status_before</code> خالی می‌ماند و پاس مقصد باز هم آن را می‌خواند. همچنین رفع شد: <code>--source -f &lt;csv&gt;</code> دیگر سطر هدر <code>user,domain</code> را یک اکانت واقعی حساب نمی‌کند، پس می‌شود همان <code>migration.csv</code> را دوباره به‌عنوان لیست اکانت به اسکریپت داد.</li>
+                </ul>
+            </article>
 
             <article class="entry" data-script="plugin-hunter" data-date="2026-08-22">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.10.0</span><time datetime="2026-08-22">2026-08-22</time>
