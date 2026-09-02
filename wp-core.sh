@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.5.0
+#   Version   : 1.6.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.5.0"
+VERSION="1.6.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -50,6 +50,7 @@ start_log() {
     _LOG_TEE_PID=$!
 }
 finish_log() {
+    [ -n "${HELPER:-}" ] && rm -f "$HELPER"
     [ -n "$LOG_FILE" ] || return 0
     exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
     [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
@@ -81,6 +82,11 @@ Options:
   -b, --rollback          Roll back to the previous core (old-core/).
   -f, --fresh             Fresh install — provision a brand-new site.
   -A, --admin             Manage administrator users.
+      --admin-user <u>    Create that administrator without prompting. When
+                          omitted, the next free "admin", "admin1", "admin2"…
+                          login is used instead.
+      --admin-email <e>   Email for the created administrator (optional).
+      --admin-pass <p>    Password for it (default: auto-generated).
   -V, --version <ver>     Version for --install / --fresh (e.g. 6.9.5, latest).
   -z, --custom-url <url>  Use this URL as the core package instead of resolving
                           a version (works with --install/--fresh; skips -V).
@@ -96,6 +102,8 @@ Examples:
   wp-core.sh -d site.ir --update
   wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
   wp-core.sh -d site.ir --fresh --version latest -y
+  wp-core.sh -d site.ir --admin-user bob --admin-email bob@site.ir
+  wp-core.sh -d site.ir -A -y            # auto login + auto password
   wp-core.sh -d site.ir --install --custom-url https://example.com/core.zip -y
   wp-core.sh -p /home/u/public_html --install --custom-zip /root/core.zip -y
 EOF
@@ -108,6 +116,10 @@ REQ_VERSION=""
 CUSTOM_URL=""
 CUSTOM_ZIP=""
 ASSUME_YES=""
+ADMIN_USER=""
+ADMIN_EMAIL=""
+ADMIN_PASS=""
+ADMIN_CREATE=""
 
 # Only one action may be chosen at a time; a second one is a usage error.
 set_action() {
@@ -131,6 +143,9 @@ while [ $# -gt 0 ]; do
         -b|--rollback) set_action rollback; shift ;;
         -f|--fresh)    set_action fresh;    shift ;;
         -A|--admin)    set_action admin;    shift ;;
+        --admin-user)  [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; ADMIN_USER="$2";  ADMIN_CREATE="yes"; set_action admin; shift 2 ;;
+        --admin-email) [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; ADMIN_EMAIL="$2"; ADMIN_CREATE="yes"; set_action admin; shift 2 ;;
+        --admin-pass)  [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; ADMIN_PASS="$2";  ADMIN_CREATE="yes"; set_action admin; shift 2 ;;
         -y|--yes)      ASSUME_YES="yes";    shift ;;
         -h|--help)     usage; exit 0 ;;
         --)            shift; break ;;
@@ -138,6 +153,10 @@ while [ $# -gt 0 ]; do
         *)             WP_PATH="$1"; shift ;;   # bare positional path
     esac
 done
+
+if [ "$ACTION" = "admin" ] && [ -n "$ASSUME_YES" ]; then
+    ADMIN_CREATE="yes"
+fi
 
 if [ -n "$CUSTOM_URL" ] && [ -n "$CUSTOM_ZIP" ]; then
     echo -e "${RED}✘ Use either --custom-url or --custom-zip, not both.${NC}" >&2
@@ -166,11 +185,20 @@ print_header() {
 #  HELPERS
 #############################################
 
-# Strong-ish random password that satisfies common panel policies.
+# Fully random password — every character is drawn from /dev/urandom, with no
+# fixed prefix/suffix. Retries until the result contains at least one lowercase,
+# uppercase, digit and symbol, so common panel/WordPress policies are satisfied.
 gen_password() {
-    local base
-    base=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 14)
-    printf '%sXy9@#' "$base"
+    local len="${1:-20}" pool='A-Za-z0-9@#%^*_+=-' pass i
+    for ((i = 0; i < 32; i++)); do
+        pass=$(LC_ALL=C tr -dc "$pool" < /dev/urandom | head -c "$len")
+        if [[ $pass == *[a-z]* && $pass == *[A-Z]* && $pass == *[0-9]* \
+              && $pass == *[@\#%^*_+=-]* ]]; then
+            printf '%s' "$pass"
+            return 0
+        fi
+    done
+    printf '%s' "$pass"
 }
 
 # 64-char salt for wp-config secret keys (no quote/backslash chars).
@@ -604,6 +632,73 @@ require $root . '/wp-load.php';
 
 $action = getenv('WPC_ACTION');
 
+// Next free administrator login: admin, then admin1, admin2, ...
+function wpc_suggest_login($base) {
+    if ($base === '') { $base = 'admin'; }
+    if (!username_exists($base)) { return $base; }
+    for ($i = 1; $i < 1000; $i++) {
+        if (!username_exists($base . $i)) { return $base . $i; }
+    }
+    return $base . wp_rand(1000, 999999);
+}
+
+// Where the login form really lives. wp_login_url() carries the filters every
+// "hide login" plugin installs; the options table names which plugin did it.
+function wpc_login_info() {
+    $url     = wp_login_url();
+    $default = site_url('wp-login.php', 'login');
+    $plugin  = '';
+    $slug    = '';
+
+    $probes = array(
+        array('WPS Hide Login',         'whl_page',                  ''),
+        array('Rename wp-login.php',    'rwl_page',                  ''),
+        array('Hide My WP Ghost',       'hmwp_login_url',            ''),
+        array('All In One WP Security', 'aio_wp_security_configs',   'aiowps_login_page_slug'),
+        array('Defender',               'wd_masking_login_settings', 'mask_url'),
+        array('WP Cerber',              'cerber_settings',           'loginpath'),
+        array('Perfmatters',            'perfmatters_options',       'login_url'),
+    );
+    foreach ($probes as $probe) {
+        $value = get_option($probe[1]);
+        if ($probe[2] !== '') {
+            $value = (is_array($value) && isset($value[$probe[2]])) ? $value[$probe[2]] : '';
+        }
+        if (is_string($value) && $value !== '') {
+            $slug   = $value;
+            $plugin = $probe[0];
+            break;
+        }
+    }
+    if ($slug === '') {
+        $storage = get_option('itsec-storage');
+        if (is_array($storage) && !empty($storage['hide-backend']['enabled'])
+            && !empty($storage['hide-backend']['slug'])) {
+            $slug   = $storage['hide-backend']['slug'];
+            $plugin = 'Solid Security';
+        }
+    }
+    // Plugin stored a slug but did not filter login_url in this CLI context.
+    if ($url === $default && $slug !== '') {
+        $url = home_url('/' . ltrim($slug, '/'));
+    }
+    if ($url === $default) { $plugin = ''; }
+
+    return array($url, $plugin, $url !== $default);
+}
+
+if ($action === 'info') {
+    $base = getenv('WPC_BASE');
+    list($login_url, $login_plugin, $login_custom) = wpc_login_info();
+    echo "LOGIN_URL=" . $login_url . "\n";
+    echo "LOGIN_PLUGIN=" . $login_plugin . "\n";
+    echo "LOGIN_CUSTOM=" . ($login_custom ? '1' : '0') . "\n";
+    echo "SITE_URL=" . site_url() . "\n";
+    echo "HOME_URL=" . home_url() . "\n";
+    echo "SUGGEST=" . wpc_suggest_login($base ? $base : 'admin') . "\n";
+    exit(0);
+}
+
 if ($action === 'list') {
     $admins = get_users(array('role' => 'administrator', 'orderby' => 'ID'));
     if (empty($admins)) {
@@ -651,11 +746,87 @@ PHP
 
 # php_run VAR=val VAR=val ...  — runs the helper as the site owner when possible.
 php_run() {
+    local tmo=()
+    command -v timeout >/dev/null 2>&1 && tmo=(timeout "${WPC_TIMEOUT:-120}")
     if [[ $EUID -eq 0 && -n "$OWNER" ]] && command -v sudo >/dev/null 2>&1; then
-        sudo -u "$OWNER" env "$@" "$PHP_BIN" "$HELPER"
+        "${tmo[@]}" sudo -u "$OWNER" env "$@" "$PHP_BIN" "$HELPER"
     else
-        env "$@" "$PHP_BIN" "$HELPER"
+        "${tmo[@]}" env "$@" "$PHP_BIN" "$HELPER"
     fi
+}
+
+# One cached round-trip into the live site: real login URL + next free login.
+WPC_INFO_DONE=""
+WPC_LOGIN_URL=""
+WPC_LOGIN_PLUGIN=""
+WPC_LOGIN_CUSTOM=""
+WPC_SITE_URL=""
+WPC_HOME_URL=""
+WPC_SUGGEST=""
+
+wp_info() {
+    # Probe once per run; later calls replay the first attempt's verdict.
+    if [[ -n "$WPC_INFO_DONE" ]]; then
+        [[ -n "$WPC_LOGIN_URL" ]]
+        return
+    fi
+    WPC_INFO_DONE="yes"
+    [[ -f "wp-config.php" ]] || return 1
+    detect_php || return 1
+    write_admin_helper
+
+    local out line
+    out=$(WPC_TIMEOUT=25 php_run WPC_ROOT="$WEBROOT" WPC_ACTION=info WPC_BASE=admin 2>/dev/null)
+    while IFS= read -r line; do
+        case "$line" in
+            LOGIN_URL=*)    WPC_LOGIN_URL="${line#*=}" ;;
+            LOGIN_PLUGIN=*) WPC_LOGIN_PLUGIN="${line#*=}" ;;
+            LOGIN_CUSTOM=*) WPC_LOGIN_CUSTOM="${line#*=}" ;;
+            SITE_URL=*)     WPC_SITE_URL="${line#*=}" ;;
+            HOME_URL=*)     WPC_HOME_URL="${line#*=}" ;;
+            SUGGEST=*)      WPC_SUGGEST="${line#*=}" ;;
+        esac
+    done <<< "$out"
+    [[ -n "$WPC_LOGIN_URL" ]]
+}
+
+# "Login URL: ..." plus the plugin that moved it, when one did.
+print_login_url() {
+    wp_info || return 0
+    if [[ "$WPC_LOGIN_CUSTOM" == "1" ]]; then
+        echo -e "${GREEN}✔ Login URL: ${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
+    else
+        echo -e "${GREEN}✔ Login URL: ${WPC_LOGIN_URL}${NC}"
+    fi
+}
+
+# --admin-user/--admin-email/--admin-pass (or -A -y): create without prompting.
+create_admin_auto() {
+    if [[ ! -f "wp-config.php" ]]; then
+        echo -e "${RED}✘ wp-config.php not found — cannot reach the database.${NC}"
+        return 1
+    fi
+    if ! detect_php; then
+        echo -e "${RED}✘ No PHP CLI binary found; admin management needs PHP.${NC}"
+        return 1
+    fi
+
+    write_admin_helper
+    trap 'rm -f "$HELPER"' RETURN
+    wp_info >/dev/null 2>&1
+
+    if [[ -z "$ADMIN_USER" ]]; then
+        ADMIN_USER="${WPC_SUGGEST:-admin}"
+        echo -e "${BLUE}No --admin-user given — using${NC} ${GREEN}${ADMIN_USER}${NC}"
+    fi
+    if [[ -z "$ADMIN_PASS" ]]; then
+        ADMIN_PASS=$(gen_password)
+    fi
+
+    php_run WPC_ROOT="$WEBROOT" WPC_ACTION=create WPC_LOGIN="$ADMIN_USER" \
+            WPC_EMAIL="$ADMIN_EMAIL" WPC_PASS="$ADMIN_PASS" || return 1
+    echo -e "${GREEN}✔ Login: ${ADMIN_USER}  ·  Password: ${ADMIN_PASS}${NC}"
+    print_login_url
 }
 
 manage_admins() {
@@ -676,6 +847,14 @@ manage_admins() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}      Administrator User Management     ${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    if wp_info; then
+        if [[ "$WPC_LOGIN_CUSTOM" == "1" ]]; then
+            echo -e "  ${BLUE}Login URL:${NC} ${YELLOW}${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
+        else
+            echo -e "  ${BLUE}Login URL:${NC} ${GREEN}${WPC_LOGIN_URL}${NC}"
+        fi
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    fi
     echo -e "${YELLOW}1) List administrator accounts${NC}"
     echo -e "${YELLOW}2) Change an administrator's password${NC}"
     echo -e "${YELLOW}3) Create a new administrator${NC}"
@@ -704,7 +883,10 @@ manage_admins() {
             ;;
         3)
             echo
-            read -p "$(echo -e ${CYAN}'New admin login: '${NC})" A_LOGIN
+            wp_info >/dev/null 2>&1
+            A_SUGGEST="${WPC_SUGGEST:-admin}"
+            read -p "$(echo -e ${CYAN}"New admin login (${A_SUGGEST}): "${NC})" A_LOGIN
+            A_LOGIN="${A_LOGIN:-$A_SUGGEST}"
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
             read -p "$(echo -e ${CYAN}'Email: '${NC})" A_EMAIL
             read -s -p "$(echo -e ${CYAN}'Password (blank = auto-generate): '${NC})" A_PASS; echo
@@ -712,9 +894,11 @@ manage_admins() {
                 A_PASS=$(gen_password)
                 echo -e "${BLUE}Generated password:${NC} $A_PASS"
             fi
-            php_run WPC_ROOT="$WEBROOT" WPC_ACTION=create WPC_LOGIN="$A_LOGIN" \
-                    WPC_EMAIL="$A_EMAIL" WPC_PASS="$A_PASS" \
-                && echo -e "${GREEN}✔ Login: ${A_LOGIN}  ·  Password: ${A_PASS}${NC}"
+            if php_run WPC_ROOT="$WEBROOT" WPC_ACTION=create WPC_LOGIN="$A_LOGIN" \
+                    WPC_EMAIL="$A_EMAIL" WPC_PASS="$A_PASS"; then
+                echo -e "${GREEN}✔ Login: ${A_LOGIN}  ·  Password: ${A_PASS}${NC}"
+                print_login_url
+            fi
             ;;
         *)
             echo -e "${RED}Invalid choice!${NC}"
@@ -737,7 +921,8 @@ if [ -n "$ACTION" ]; then
         install)  action="custom"
                   [ -n "$REQ_VERSION" ] && CUSTOM_VERSION="$REQ_VERSION" ;;
         rollback) action="rollback" ;;
-        admin)    manage_admins; exit $? ;;
+        admin)    if [ -n "$ADMIN_CREATE" ]; then create_admin_auto; else manage_admins; fi
+                  exit $? ;;
         fresh)    fresh_install; exit 0 ;;
     esac
 fi
@@ -754,6 +939,16 @@ elif [[ "$WP_PRESENT" == true ]]; then
     echo -e "  ${BLUE}Current version:${NC} ${YELLOW}not detected${NC}"
 else
     echo -e "  ${BLUE}WordPress      :${NC} ${YELLOW}not installed in this webroot${NC}"
+fi
+if wp_info; then
+    if [[ "$WPC_LOGIN_CUSTOM" == "1" ]]; then
+        echo -e "  ${BLUE}Login URL      :${NC} ${YELLOW}${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
+    else
+        echo -e "  ${BLUE}Login URL      :${NC} ${GREEN}${WPC_LOGIN_URL}${NC}"
+    fi
+    if [[ -n "$WPC_SITE_URL" && "$WPC_SITE_URL" != "$WPC_HOME_URL" ]]; then
+        echo -e "  ${BLUE}WP address     :${NC} ${WPC_SITE_URL} ${YELLOW}(differs from site address)${NC}"
+    fi
 fi
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo
