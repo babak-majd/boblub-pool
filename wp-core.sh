@@ -50,7 +50,6 @@ start_log() {
     _LOG_TEE_PID=$!
 }
 finish_log() {
-    [ -n "${HELPER:-}" ] && rm -f "$HELPER"
     [ -n "$LOG_FILE" ] || return 0
     exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
     [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
@@ -209,19 +208,6 @@ gen_salt() {
 # Escape a value for safe use on the replacement side of `sed s|...|VALUE|`.
 sed_escape() {
     printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
-}
-
-# Locate a usable PHP CLI binary; sets PHP_BIN on success.
-detect_php() {
-    local c
-    for c in php /usr/local/bin/php /opt/cpanel/ea-php83/root/usr/bin/php \
-             /opt/cpanel/ea-php82/root/usr/bin/php /opt/cpanel/ea-php81/root/usr/bin/php; do
-        if command -v "$c" >/dev/null 2>&1; then
-            PHP_BIN="$c"
-            return 0
-        fi
-    done
-    return 1
 }
 
 # Map a requested version to IR-mirror + official URLs (sets URL_IR / URL_ORG).
@@ -614,180 +600,227 @@ fresh_install() {
 
 
 #############################################
+#  DIRECT DATABASE ACCESS  (no PHP involved)
+#############################################
+# Everything below talks to MySQL with the credentials in wp-config.php. The
+# site's own PHP version is irrelevant, nothing bootstraps WordPress, and no
+# plugin code is executed.
+WPDB_NAME=""
+WPDB_USER=""
+WPDB_PASS=""
+WPDB_HOST=""
+WPDB_PREFIX="wp_"
+WPDB_MULTISITE=""
+WPDB_READY=""
+WPDB_ARGS=()
+
+# Value of a define('NAME', 'value') in wp-config.php. Both quote styles are
+# accepted and their PHP escapes are decoded, so a password holding a backslash
+# or a quote survives the trip.
+wpconf_define() {
+    local raw
+    raw=$(sed -n "s/^[[:space:]]*define([[:space:]]*['\"]$1['\"][[:space:]]*,[[:space:]]*'\(.*\)'[[:space:]]*)[[:space:]]*;.*/\1/p" \
+          wp-config.php 2>/dev/null | head -n1)
+    if [[ -n "$raw" ]]; then
+        printf '%s' "$raw" | sed -e "s/\\\\'/'/g" -e 's/\\\\/\\/g'
+        return
+    fi
+    raw=$(sed -n "s/^[[:space:]]*define([[:space:]]*['\"]$1['\"][[:space:]]*,[[:space:]]*\"\(.*\)\"[[:space:]]*)[[:space:]]*;.*/\1/p" \
+          wp-config.php 2>/dev/null | head -n1)
+    printf '%s' "$raw" | sed -e 's/\\"/"/g' -e 's/\\\$/$/g' -e 's/\\\\/\\/g'
+}
+
+# Escape a value for a single-quoted SQL literal.
+sql_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"
+}
+
+# Run the SQL arriving on stdin; rows come back tab-separated, no headers.
+# --no-defaults keeps a stray ~/.my.cnf from hijacking the credentials, and
+# MYSQL_PWD keeps the password out of the process list.
+wpdb_query() {
+    MYSQL_PWD="$WPDB_PASS" mysql --no-defaults -u "$WPDB_USER" "${WPDB_ARGS[@]}" \
+        -N -B --connect-timeout=10 "$WPDB_NAME"
+}
+
+# Read wp-config.php and find a connection that actually works. Cached.
+wpdb_init() {
+    if [[ -n "$WPDB_READY" ]]; then
+        [[ "$WPDB_READY" == "yes" ]]
+        return
+    fi
+    WPDB_READY="no"
+
+    [[ -f "wp-config.php" ]] || return 1
+    command -v mysql >/dev/null 2>&1 || return 1
+
+    WPDB_NAME=$(wpconf_define DB_NAME)
+    WPDB_USER=$(wpconf_define DB_USER)
+    WPDB_PASS=$(wpconf_define DB_PASSWORD)
+    WPDB_HOST=$(wpconf_define DB_HOST)
+    [[ -n "$WPDB_NAME" && -n "$WPDB_USER" ]] || return 1
+
+    local pfx
+    pfx=$(sed -n "s/^[[:space:]]*\$table_prefix[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" \
+          wp-config.php 2>/dev/null | head -n1)
+    [[ -n "$pfx" ]] && WPDB_PREFIX="$pfx"
+
+    grep -qE "define\(\s*['\"]MULTISITE['\"]\s*,\s*true" wp-config.php 2>/dev/null \
+        && WPDB_MULTISITE="yes"
+
+    # DB_HOST is "host", "host:port" or "host:/path/to/socket".
+    local host="${WPDB_HOST:-localhost}" hostname port="" socket=""
+    hostname="${host%%:*}"
+    [[ "$host" == *:* ]] && port="${host#*:}"
+    if [[ "$port" == /* ]]; then socket="$port"; port=""; fi
+    [[ -n "$hostname" ]] || hostname="localhost"
+
+    # First candidate is what wp-config asks for; the rest cover servers whose
+    # socket path differs from the client's compiled-in default.
+    local -a candidates=()
+    if [[ -n "$socket" ]]; then
+        candidates+=("--socket=$socket")
+    elif [[ -n "$port" ]]; then
+        candidates+=("--host=$hostname|--port=$port|--protocol=TCP")
+    else
+        candidates+=("--host=$hostname")
+    fi
+    candidates+=(
+        "--socket=/var/lib/mysql/mysql.sock"
+        "--socket=/var/run/mysqld/mysqld.sock"
+        "--socket=/tmp/mysql.sock"
+        "--host=127.0.0.1|--protocol=TCP"
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        IFS='|' read -r -a WPDB_ARGS <<< "$candidate"
+        if wpdb_query <<< "SELECT 1;" >/dev/null 2>&1; then
+            WPDB_READY="yes"
+            return 0
+        fi
+    done
+
+    WPDB_ARGS=()
+    return 1
+}
+
+# Shared "we cannot reach the database" complaint.
+wpdb_require() {
+    wpdb_init && return 0
+    if [[ ! -f "wp-config.php" ]]; then
+        echo -e "${RED}✘ wp-config.php not found — cannot reach the database.${NC}"
+    elif ! command -v mysql >/dev/null 2>&1; then
+        echo -e "${RED}✘ No mysql client found; admin management needs one.${NC}"
+    else
+        echo -e "${RED}✘ Could not connect with the credentials in wp-config.php.${NC}"
+    fi
+    return 1
+}
+
+
+#############################################
 #  ADMINISTRATOR USER MANAGEMENT
 #############################################
-HELPER=""
 
-write_admin_helper() {
-    HELPER="$WEBROOT/.wpc-admin-$$.php"
-    cat > "$HELPER" <<'PHP'
-<?php
-define('WP_USE_THEMES', false);
-$root = getenv('WPC_ROOT');
-if (!$root || !file_exists($root . '/wp-load.php')) {
-    fwrite(STDERR, "wp-load.php not found\n");
-    exit(10);
-}
-require $root . '/wp-load.php';
-
-$action = getenv('WPC_ACTION');
-
-// Next free administrator login: admin, then admin1, admin2, ...
-function wpc_suggest_login($base) {
-    if ($base === '') { $base = 'admin'; }
-    if (!username_exists($base)) { return $base; }
-    for ($i = 1; $i < 1000; $i++) {
-        if (!username_exists($base . $i)) { return $base . $i; }
-    }
-    return $base . wp_rand(1000, 999999);
+# Pull s:N:"key";s:N:"value" out of a serialized option blob.
+serialized_str() {
+    printf '%s' "$1" | sed -n "s/.*s:[0-9]*:\"$2\";s:[0-9]*:\"\([^\"]*\)\".*/\1/p" | head -n1
 }
 
-// Where the login form really lives. wp_login_url() carries the filters every
-// "hide login" plugin installs; the options table names which plugin did it.
-function wpc_login_info() {
-    $url     = wp_login_url();
-    $default = site_url('wp-login.php', 'login');
-    $plugin  = '';
-    $slug    = '';
-
-    $probes = array(
-        array('WPS Hide Login',         'whl_page',                  ''),
-        array('Rename wp-login.php',    'rwl_page',                  ''),
-        array('Hide My WP Ghost',       'hmwp_login_url',            ''),
-        array('All In One WP Security', 'aio_wp_security_configs',   'aiowps_login_page_slug'),
-        array('Defender',               'wd_masking_login_settings', 'mask_url'),
-        array('WP Cerber',              'cerber_settings',           'loginpath'),
-        array('Perfmatters',            'perfmatters_options',       'login_url'),
-    );
-    foreach ($probes as $probe) {
-        $value = get_option($probe[1]);
-        if ($probe[2] !== '') {
-            $value = (is_array($value) && isset($value[$probe[2]])) ? $value[$probe[2]] : '';
+# Same, but only inside the sub-array that follows a given key.
+serialized_nested() {
+    printf '%s' "$1" | awk -v outer="$2" -v inner="$3" '{
+        pos = index($0, "\"" outer "\"")
+        if (pos == 0) exit
+        rest = substr($0, pos)
+        if (match(rest, "s:[0-9]+:\"" inner "\";s:[0-9]+:\"[^\"]*\"")) {
+            hit = substr(rest, RSTART, RLENGTH)
+            sub("^s:[0-9]+:\"" inner "\";s:[0-9]+:\"", "", hit)
+            sub("\"$", "", hit)
+            print hit
         }
-        if (is_string($value) && $value !== '') {
-            $slug   = $value;
-            $plugin = $probe[0];
-            break;
-        }
-    }
-    if ($slug === '') {
-        $storage = get_option('itsec-storage');
-        if (is_array($storage) && !empty($storage['hide-backend']['enabled'])
-            && !empty($storage['hide-backend']['slug'])) {
-            $slug   = $storage['hide-backend']['slug'];
-            $plugin = 'Solid Security';
-        }
-    }
-    // Plugin stored a slug but did not filter login_url in this CLI context.
-    if ($url === $default && $slug !== '') {
-        $url = home_url('/' . ltrim($slug, '/'));
-    }
-    if ($url === $default) { $plugin = ''; }
-
-    return array($url, $plugin, $url !== $default);
+    }'
 }
 
-if ($action === 'info') {
-    $base = getenv('WPC_BASE');
-    list($login_url, $login_plugin, $login_custom) = wpc_login_info();
-    echo "LOGIN_URL=" . $login_url . "\n";
-    echo "LOGIN_PLUGIN=" . $login_plugin . "\n";
-    echo "LOGIN_CUSTOM=" . ($login_custom ? '1' : '0') . "\n";
-    echo "SITE_URL=" . site_url() . "\n";
-    echo "HOME_URL=" . home_url() . "\n";
-    echo "SUGGEST=" . wpc_suggest_login($base ? $base : 'admin') . "\n";
-    exit(0);
-}
-
-if ($action === 'list') {
-    $admins = get_users(array('role' => 'administrator', 'orderby' => 'ID'));
-    if (empty($admins)) {
-        echo "(no administrator accounts found)\n";
-        exit(0);
-    }
-    printf("%-5s  %-24s  %-32s  %s\n", 'ID', 'LOGIN', 'EMAIL', 'REGISTERED');
-    foreach ($admins as $u) {
-        printf("%-5d  %-24s  %-32s  %s\n",
-            $u->ID, $u->user_login, $u->user_email, $u->user_registered);
-    }
-    exit(0);
-}
-
-if ($action === 'passwd') {
-    $login = getenv('WPC_LOGIN');
-    $user  = get_user_by('login', $login);
-    if (!$user) { fwrite(STDERR, "User '$login' not found\n"); exit(2); }
-    wp_set_password(getenv('WPC_PASS'), $user->ID);
-    echo "Password updated for '$login' (ID {$user->ID})\n";
-    exit(0);
-}
-
-if ($action === 'create') {
-    $login = getenv('WPC_LOGIN');
-    $email = getenv('WPC_EMAIL');
-    if (username_exists($login)) { fwrite(STDERR, "Login '$login' already exists\n"); exit(3); }
-    if ($email && email_exists($email)) { fwrite(STDERR, "Email '$email' already exists\n"); exit(3); }
-    $uid = wp_insert_user(array(
-        'user_login' => $login,
-        'user_pass'  => getenv('WPC_PASS'),
-        'user_email' => $email,
-        'role'       => 'administrator',
-    ));
-    if (is_wp_error($uid)) { fwrite(STDERR, $uid->get_error_message() . "\n"); exit(4); }
-    echo "Administrator '$login' created (ID $uid)\n";
-    exit(0);
-}
-
-fwrite(STDERR, "Unknown action\n");
-exit(9);
-PHP
-    chmod 644 "$HELPER"
-}
-
-# php_run VAR=val VAR=val ...  — runs the helper as the site owner when possible.
-php_run() {
-    local tmo=()
-    command -v timeout >/dev/null 2>&1 && tmo=(timeout "${WPC_TIMEOUT:-120}")
-    if [[ $EUID -eq 0 && -n "$OWNER" ]] && command -v sudo >/dev/null 2>&1; then
-        "${tmo[@]}" sudo -u "$OWNER" env "$@" "$PHP_BIN" "$HELPER"
-    else
-        "${tmo[@]}" env "$@" "$PHP_BIN" "$HELPER"
-    fi
-}
-
-# One cached round-trip into the live site: real login URL + next free login.
 WPC_INFO_DONE=""
 WPC_LOGIN_URL=""
 WPC_LOGIN_PLUGIN=""
 WPC_LOGIN_CUSTOM=""
 WPC_SITE_URL=""
 WPC_HOME_URL=""
-WPC_SUGGEST=""
+WPC_LOGIN_WARN=""
 
+# One pass over wp_options: site addresses plus wherever the login form moved.
+# Every known "hide login" plugin keeps its slug in an option, so the answer
+# comes straight out of the database instead of from a WordPress bootstrap.
 wp_info() {
-    # Probe once per run; later calls replay the first attempt's verdict.
     if [[ -n "$WPC_INFO_DONE" ]]; then
         [[ -n "$WPC_LOGIN_URL" ]]
         return
     fi
     WPC_INFO_DONE="yes"
-    [[ -f "wp-config.php" ]] || return 1
-    detect_php || return 1
-    write_admin_helper
+    wpdb_init || return 1
 
-    local out line
-    out=$(WPC_TIMEOUT=25 php_run WPC_ROOT="$WEBROOT" WPC_ACTION=info WPC_BASE=admin 2>/dev/null)
-    while IFS= read -r line; do
-        case "$line" in
-            LOGIN_URL=*)    WPC_LOGIN_URL="${line#*=}" ;;
-            LOGIN_PLUGIN=*) WPC_LOGIN_PLUGIN="${line#*=}" ;;
-            LOGIN_CUSTOM=*) WPC_LOGIN_CUSTOM="${line#*=}" ;;
-            SITE_URL=*)     WPC_SITE_URL="${line#*=}" ;;
-            HOME_URL=*)     WPC_HOME_URL="${line#*=}" ;;
-            SUGGEST=*)      WPC_SUGGEST="${line#*=}" ;;
-        esac
-    done <<< "$out"
-    [[ -n "$WPC_LOGIN_URL" ]]
+    local rows name value slug="" plugin="" active=""
+    declare -A opt=()
+    rows=$(wpdb_query <<SQL
+SELECT option_name, option_value FROM \`${WPDB_PREFIX}options\`
+ WHERE option_name IN ('siteurl','home','active_plugins','whl_page','rwl_page',
+       'hmwp_login_url','aio_wp_security_configs','wd_masking_login_settings',
+       'cerber_settings','perfmatters_options','itsec-storage');
+SQL
+    ) || return 1
+
+    while IFS=$'\t' read -r name value; do
+        [[ -n "$name" ]] && opt["$name"]="$value"
+    done <<< "$rows"
+
+    WPC_SITE_URL="${opt[siteurl]}"
+    WPC_HOME_URL="${opt[home]}"
+    [[ -n "$WPC_SITE_URL" ]] || return 1
+    active="${opt[active_plugins]}"
+
+    # Plain-string slugs first, then the ones buried in serialized arrays.
+    if   [[ -n "${opt[whl_page]}"       ]]; then slug="${opt[whl_page]}";       plugin="WPS Hide Login"
+    elif [[ -n "${opt[rwl_page]}"       ]]; then slug="${opt[rwl_page]}";       plugin="Rename wp-login.php"
+    elif [[ -n "${opt[hmwp_login_url]}" ]]; then slug="${opt[hmwp_login_url]}"; plugin="Hide My WP Ghost"
+    fi
+    if [[ -z "$slug" && -n "${opt[aio_wp_security_configs]}" ]]; then
+        slug=$(serialized_str "${opt[aio_wp_security_configs]}" 'aiowps_login_page_slug')
+        [[ -n "$slug" ]] && plugin="All In One WP Security"
+    fi
+    if [[ -z "$slug" && -n "${opt[wd_masking_login_settings]}" ]]; then
+        slug=$(serialized_str "${opt[wd_masking_login_settings]}" 'mask_url')
+        [[ -n "$slug" ]] && plugin="Defender"
+    fi
+    if [[ -z "$slug" && -n "${opt[cerber_settings]}" ]]; then
+        slug=$(serialized_str "${opt[cerber_settings]}" 'loginpath')
+        [[ -n "$slug" ]] && plugin="WP Cerber"
+    fi
+    if [[ -z "$slug" && -n "${opt[perfmatters_options]}" ]]; then
+        slug=$(serialized_str "${opt[perfmatters_options]}" 'login_url')
+        [[ -n "$slug" ]] && plugin="Perfmatters"
+    fi
+    if [[ -z "$slug" && -n "${opt[itsec-storage]}" ]]; then
+        slug=$(serialized_nested "${opt[itsec-storage]}" 'hide-backend' 'slug')
+        [[ -n "$slug" ]] && plugin="Solid Security"
+    fi
+
+    if [[ -n "$slug" ]]; then
+        WPC_LOGIN_URL="${WPC_HOME_URL%/}/${slug#/}"
+        WPC_LOGIN_PLUGIN="$plugin"
+        WPC_LOGIN_CUSTOM="1"
+    else
+        WPC_LOGIN_URL="${WPC_SITE_URL%/}/wp-login.php"
+        WPC_LOGIN_CUSTOM="0"
+        # A login-hiding plugin we do not have an option key for: say so rather
+        # than quietly reporting the default address.
+        if printf '%s' "$active" | grep -qiE 'hide[-_]?(my[-_]?wp|login)|rename[-_]?wp[-_]?login|login[-_]?(url|lockdown)|wps-hide|sg-security|wp-cerber|better-wp-security|defender-security'; then
+            WPC_LOGIN_WARN="a login-hiding plugin looks active — verify this address"
+        fi
+    fi
+    return 0
 }
 
 # "Login URL: ..." plus the plugin that moved it, when one did.
@@ -797,51 +830,139 @@ print_login_url() {
         echo -e "${GREEN}✔ Login URL: ${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
     else
         echo -e "${GREEN}✔ Login URL: ${WPC_LOGIN_URL}${NC}"
+        [[ -n "$WPC_LOGIN_WARN" ]] && echo -e "  ${YELLOW}⚠ ${WPC_LOGIN_WARN}${NC}"
+    fi
+}
+
+wpdb_login_taken() {
+    local hits
+    hits=$(wpdb_query <<< "SELECT COUNT(*) FROM \`${WPDB_PREFIX}users\` WHERE user_login = '$(sql_escape "$1")';")
+    [[ -n "$hits" && "$hits" != "0" ]]
+}
+
+# First free login in the admin, admin1, admin2... series — one query, not N.
+wpdb_suggest_login() {
+    local base="${1:-admin}" taken i
+    taken=$(wpdb_query <<< "SELECT user_login FROM \`${WPDB_PREFIX}users\` WHERE user_login LIKE '$(sql_escape "$base")%';")
+    if ! grep -qxF "$base" <<< "$taken"; then printf '%s' "$base"; return 0; fi
+    for ((i = 1; i < 1000; i++)); do
+        if ! grep -qxF "${base}${i}" <<< "$taken"; then printf '%s' "${base}${i}"; return 0; fi
+    done
+    printf '%s%s' "$base" "$RANDOM"
+}
+
+wpdb_list_admins() {
+    local rows
+    rows=$(wpdb_query <<SQL
+SELECT u.ID, u.user_login, u.user_email, u.user_registered
+  FROM \`${WPDB_PREFIX}users\` u
+  JOIN \`${WPDB_PREFIX}usermeta\` m ON m.user_id = u.ID
+ WHERE m.meta_key = '${WPDB_PREFIX}capabilities'
+   AND m.meta_value LIKE '%"administrator"%'
+ ORDER BY u.ID;
+SQL
+    ) || return 1
+    if [[ -z "$rows" ]]; then
+        echo "(no administrator accounts found)"
+        return 0
+    fi
+    printf "%-5s  %-24s  %-32s  %s\n" 'ID' 'LOGIN' 'EMAIL' 'REGISTERED'
+    while IFS=$'\t' read -r id login email reg; do
+        [[ -n "$id" ]] && printf "%-5s  %-24s  %-32s  %s\n" "$id" "$login" "$email" "$reg"
+    done <<< "$rows"
+}
+
+# WordPress accepts a bare MD5 in user_pass as its legacy format and silently
+# re-hashes it to the modern one the first time the account logs in.
+wpdb_set_password() {
+    local login="$1" pass="$2" out uid
+    uid=$(wpdb_query <<< "SELECT ID FROM \`${WPDB_PREFIX}users\` WHERE user_login = '$(sql_escape "$login")';")
+    if [[ -z "$uid" ]]; then
+        echo -e "${RED}✘ User '${login}' not found.${NC}" >&2
+        return 2
+    fi
+    out=$(wpdb_query 2>&1 <<SQL
+UPDATE \`${WPDB_PREFIX}users\` SET user_pass = MD5('$(sql_escape "$pass")') WHERE ID = ${uid};
+DELETE FROM \`${WPDB_PREFIX}usermeta\` WHERE user_id = ${uid} AND meta_key = 'session_tokens';
+SQL
+    ) || { echo -e "${RED}✘ ${out}${NC}" >&2; return 1; }
+    echo "Password updated for '${login}' (ID ${uid}) — other sessions signed out"
+}
+
+wpdb_create_admin() {
+    local login="$1" email="$2" pass="$3" nicename out uid hits
+
+    if wpdb_login_taken "$login"; then
+        echo -e "${RED}✘ Login '${login}' already exists.${NC}" >&2
+        return 3
+    fi
+    if [[ -n "$email" ]]; then
+        hits=$(wpdb_query <<< "SELECT COUNT(*) FROM \`${WPDB_PREFIX}users\` WHERE user_email = '$(sql_escape "$email")';")
+        if [[ -n "$hits" && "$hits" != "0" ]]; then
+            echo -e "${RED}✘ Email '${email}' already exists.${NC}" >&2
+            return 3
+        fi
+    fi
+
+    nicename=$(printf '%s' "$login" | tr '[:upper:]' '[:lower:]' \
+               | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//')
+    [[ -n "$nicename" ]] || nicename="$login"
+
+    out=$(wpdb_query 2>&1 <<SQL
+INSERT INTO \`${WPDB_PREFIX}users\`
+    (user_login, user_pass, user_nicename, user_email, user_url,
+     user_registered, user_activation_key, user_status, display_name)
+VALUES
+    ('$(sql_escape "$login")', MD5('$(sql_escape "$pass")'), '$(sql_escape "$nicename")',
+     '$(sql_escape "$email")', '', UTC_TIMESTAMP(), '', 0, '$(sql_escape "$login")');
+SET @uid = LAST_INSERT_ID();
+INSERT INTO \`${WPDB_PREFIX}usermeta\` (user_id, meta_key, meta_value) VALUES
+    (@uid, 'nickname', '$(sql_escape "$login")'),
+    (@uid, 'first_name', ''),
+    (@uid, 'last_name', ''),
+    (@uid, 'description', ''),
+    (@uid, 'rich_editing', 'true'),
+    (@uid, 'syntax_highlighting', 'true'),
+    (@uid, 'comment_shortcuts', 'false'),
+    (@uid, 'admin_color', 'fresh'),
+    (@uid, 'use_ssl', '0'),
+    (@uid, 'show_admin_bar_front', 'true'),
+    (@uid, 'locale', ''),
+    (@uid, '${WPDB_PREFIX}capabilities', 'a:1:{s:13:"administrator";b:1;}'),
+    (@uid, '${WPDB_PREFIX}user_level', '10'),
+    (@uid, 'dismissed_wp_pointers', '');
+SELECT @uid;
+SQL
+    ) || { echo -e "${RED}✘ ${out}${NC}" >&2; return 4; }
+
+    uid=$(printf '%s' "$out" | tail -n1)
+    echo "Administrator '${login}' created (ID ${uid})"
+    if [[ "$WPDB_MULTISITE" == "yes" ]]; then
+        echo -e "${YELLOW}⚠ Multisite detected — the role was set on the main site only,${NC}"
+        echo -e "${YELLOW}  and the account is not a network super admin.${NC}"
     fi
 }
 
 # --admin-user/--admin-email/--admin-pass (or -A -y): create without prompting.
 create_admin_auto() {
-    if [[ ! -f "wp-config.php" ]]; then
-        echo -e "${RED}✘ wp-config.php not found — cannot reach the database.${NC}"
-        return 1
-    fi
-    if ! detect_php; then
-        echo -e "${RED}✘ No PHP CLI binary found; admin management needs PHP.${NC}"
-        return 1
-    fi
-
-    write_admin_helper
-    trap 'rm -f "$HELPER"' RETURN
+    wpdb_require || return 1
     wp_info >/dev/null 2>&1
 
     if [[ -z "$ADMIN_USER" ]]; then
-        ADMIN_USER="${WPC_SUGGEST:-admin}"
+        ADMIN_USER=$(wpdb_suggest_login admin)
         echo -e "${BLUE}No --admin-user given — using${NC} ${GREEN}${ADMIN_USER}${NC}"
     fi
     if [[ -z "$ADMIN_PASS" ]]; then
         ADMIN_PASS=$(gen_password)
     fi
 
-    php_run WPC_ROOT="$WEBROOT" WPC_ACTION=create WPC_LOGIN="$ADMIN_USER" \
-            WPC_EMAIL="$ADMIN_EMAIL" WPC_PASS="$ADMIN_PASS" || return 1
+    wpdb_create_admin "$ADMIN_USER" "$ADMIN_EMAIL" "$ADMIN_PASS" || return 1
     echo -e "${GREEN}✔ Login: ${ADMIN_USER}  ·  Password: ${ADMIN_PASS}${NC}"
     print_login_url
 }
 
 manage_admins() {
-    if [[ ! -f "wp-config.php" ]]; then
-        echo -e "${RED}✘ wp-config.php not found — cannot reach the database.${NC}"
-        return 1
-    fi
-    if ! detect_php; then
-        echo -e "${RED}✘ No PHP CLI binary found; admin management needs PHP.${NC}"
-        return 1
-    fi
-
-    write_admin_helper
-    # Always clean the helper up, even on Ctrl-C.
-    trap 'rm -f "$HELPER"' RETURN
+    wpdb_require || return 1
 
     echo
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -852,6 +973,7 @@ manage_admins() {
             echo -e "  ${BLUE}Login URL:${NC} ${YELLOW}${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
         else
             echo -e "  ${BLUE}Login URL:${NC} ${GREEN}${WPC_LOGIN_URL}${NC}"
+            [[ -n "$WPC_LOGIN_WARN" ]] && echo -e "  ${YELLOW}⚠ ${WPC_LOGIN_WARN}${NC}"
         fi
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     fi
@@ -864,12 +986,12 @@ manage_admins() {
     case $achoice in
         1)
             echo
-            php_run WPC_ROOT="$WEBROOT" WPC_ACTION=list
+            wpdb_list_admins
             ;;
         2)
             echo
             echo -e "${BLUE}Current administrators:${NC}"
-            php_run WPC_ROOT="$WEBROOT" WPC_ACTION=list
+            wpdb_list_admins
             echo
             read -p "$(echo -e ${CYAN}'Login to update: '${NC})" A_LOGIN
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
@@ -878,13 +1000,12 @@ manage_admins() {
                 A_PASS=$(gen_password)
                 echo -e "${BLUE}Generated password:${NC} $A_PASS"
             fi
-            php_run WPC_ROOT="$WEBROOT" WPC_ACTION=passwd WPC_LOGIN="$A_LOGIN" WPC_PASS="$A_PASS" \
+            wpdb_set_password "$A_LOGIN" "$A_PASS" \
                 && echo -e "${GREEN}✔ Done.${NC}"
             ;;
         3)
             echo
-            wp_info >/dev/null 2>&1
-            A_SUGGEST="${WPC_SUGGEST:-admin}"
+            A_SUGGEST=$(wpdb_suggest_login admin)
             read -p "$(echo -e ${CYAN}"New admin login (${A_SUGGEST}): "${NC})" A_LOGIN
             A_LOGIN="${A_LOGIN:-$A_SUGGEST}"
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
@@ -894,8 +1015,7 @@ manage_admins() {
                 A_PASS=$(gen_password)
                 echo -e "${BLUE}Generated password:${NC} $A_PASS"
             fi
-            if php_run WPC_ROOT="$WEBROOT" WPC_ACTION=create WPC_LOGIN="$A_LOGIN" \
-                    WPC_EMAIL="$A_EMAIL" WPC_PASS="$A_PASS"; then
+            if wpdb_create_admin "$A_LOGIN" "$A_EMAIL" "$A_PASS"; then
                 echo -e "${GREEN}✔ Login: ${A_LOGIN}  ·  Password: ${A_PASS}${NC}"
                 print_login_url
             fi
@@ -945,6 +1065,7 @@ if wp_info; then
         echo -e "  ${BLUE}Login URL      :${NC} ${YELLOW}${WPC_LOGIN_URL}${NC}${WPC_LOGIN_PLUGIN:+ ${MAGENTA}(${WPC_LOGIN_PLUGIN})${NC}}"
     else
         echo -e "  ${BLUE}Login URL      :${NC} ${GREEN}${WPC_LOGIN_URL}${NC}"
+        [[ -n "$WPC_LOGIN_WARN" ]] && echo -e "  ${BLUE}               ${NC} ${YELLOW}⚠ ${WPC_LOGIN_WARN}${NC}"
     fi
     if [[ -n "$WPC_SITE_URL" && "$WPC_SITE_URL" != "$WPC_HOME_URL" ]]; then
         echo -e "  ${BLUE}WP address     :${NC} ${WPC_SITE_URL} ${YELLOW}(differs from site address)${NC}"

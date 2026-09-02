@@ -84,10 +84,14 @@ Options 1–4 all copy the current core into **`old-core/`** first, so option 5 
 | # | Option | What it does |
 | --- | --- | --- |
 | **1** | List administrator accounts | Shows every admin: login, email, ID. Useful when you inherit a site and don't know who's in it. |
-| **2** | Change an administrator's password | You give a login, it sets a new password. **Gets you back in when you're locked out.** |
-| **3** | Create a new administrator | Makes a brand-new admin user with a login, email and password you choose. |
+| **2** | Change an administrator's password | You give a login, it sets a new password and signs every other session out. **Gets you back in when you're locked out.** |
+| **3** | Create a new administrator | Makes a brand-new admin. Press Enter at the login prompt and it takes the first free name in the `admin`, `admin1`, `admin2`… series — the suggestion is shown in parentheses. Leave the password blank and one is generated. |
 
-This talks to the database directly through PHP CLI, so it works **even when wp-admin is completely dead**.
+This talks to **MySQL directly**, using the credentials already in `wp-config.php` — no PHP, no WordPress bootstrap, no plugin code executed. That matters because the `php` binary on a server is often not the version the site runs on, and loading WordPress with the wrong one fatals. It also means the submenu works **even when wp-admin is completely dead**, and even when the site's PHP is broken outright.
+
+The submenu header also reports the **real login URL**, read out of `wp_options`: if a login-hiding plugin has moved `wp-login.php`, the moved address is shown along with the plugin that did it (WPS Hide Login, Rename wp-login.php, Hide My WP Ghost, All In One WP Security, Defender, WP Cerber, Perfmatters, Solid Security). The same line appears next to the WordPress version on the main menu.
+
+A newly created password is stored in WordPress's legacy MD5 format, which WordPress accepts and silently upgrades to its modern hash the first time the account signs in.
 
 ### If WordPress is *not* installed:
 
@@ -103,7 +107,13 @@ sudo ./wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
 sudo ./wp-core.sh -d site.ir --fresh --version latest -y
 sudo ./wp-core.sh -d site.ir --install --custom-url https://example.com/core.zip -y
 sudo ./wp-core.sh -p /home/u/public_html --install --custom-zip /root/core.zip -y
+
+# administrators, without any prompting:
+sudo ./wp-core.sh -d site.ir --admin-user bob --admin-email bob@site.ir
+sudo ./wp-core.sh -d site.ir -A -y     # auto login + auto password
 ```
+
+`--admin-user`, `--admin-email` and `--admin-pass` create an administrator non-interactively; any one of them implies `-A`. Leave `--admin-user` out (or use `-A -y`) and the same `admin`/`admin1`/`admin2` suggestion is used. Generated passwords are 20 characters drawn entirely from `/dev/urandom`, guaranteed to carry a lowercase, uppercase, digit and symbol.
 
 `--custom-url`/`--custom-zip` swap the core package for one you supply, instead of resolving a version — handy for a private mirror or a hand-patched core. Either zip layout works: wrapped in a `wordpress/` folder (the wordpress.org default) or flat at the zip root.
 
