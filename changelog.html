@@ -956,7 +956,23 @@
             a.dataset.date < b.dataset.date ? 1 : a.dataset.date > b.dataset.date ? -1 : 0
         );
 
-        let activeScript = null;
+        // The URL hash names the script to filter to, so /changelog#magic-move
+        // opens straight into that script's history.
+        const scriptSlugs = new Set(Array.from(filterButtons, (b) => b.dataset.script));
+
+        function scriptFromHash() {
+            let raw = location.hash.slice(1);
+            try { raw = decodeURIComponent(raw); } catch (e) { /* malformed escape */ }
+            const slug = raw.trim().replace(/\.sh$/, '');
+            return scriptSlugs.has(slug) ? slug : null;
+        }
+
+        function syncHash() {
+            const url = activeScript ? '#' + activeScript : location.pathname + location.search;
+            history.replaceState(null, '', url);
+        }
+
+        let activeScript = scriptFromHash();
 
         function render() {
             // Rebuild the stack. Every visible update gets its own box, except
@@ -980,8 +996,10 @@
         }
 
         // Clicking a script toggles its filter: same script again clears it.
+        // The hash follows the buttons, so the filtered view stays linkable.
         function toggleScript(script) {
             activeScript = activeScript === script ? null : script;
+            syncHash();
             render();
         }
 
@@ -992,6 +1010,12 @@
         allEntries.forEach((el) => {
             const tag = el.querySelector('.script-tag[data-script]');
             if (tag) tag.addEventListener('click', () => toggleScript(tag.dataset.script));
+        });
+
+        // Someone following a #script link on the page, or editing the hash by hand.
+        window.addEventListener('hashchange', () => {
+            activeScript = scriptFromHash();
+            render();
         });
 
         render();
