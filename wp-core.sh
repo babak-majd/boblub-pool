@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.6.0
+#   Version   : 1.6.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.6.0"
+VERSION="1.6.1"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -187,16 +187,20 @@ print_header() {
 # Fully random password — every character is drawn from /dev/urandom, with no
 # fixed prefix/suffix. Retries until the result contains at least one lowercase,
 # uppercase, digit and symbol, so common panel/WordPress policies are satisfied.
+# The first character is always alphanumeric: cPanel's apitool reads an argument
+# value that starts with "@" as "@filename" and dies trying to load that file,
+# and a leading "-" can be mistaken for a flag by other tools.
 gen_password() {
     local len="${1:-20}" pool='A-Za-z0-9@#%^*_+=-' pass i
     for ((i = 0; i < 32; i++)); do
         pass=$(LC_ALL=C tr -dc "$pool" < /dev/urandom | head -c "$len")
-        if [[ $pass == *[a-z]* && $pass == *[A-Z]* && $pass == *[0-9]* \
-              && $pass == *[@\#%^*_+=-]* ]]; then
+        if [[ $pass == [A-Za-z0-9]* && $pass == *[a-z]* && $pass == *[A-Z]* \
+              && $pass == *[0-9]* && $pass == *[@\#%^*_+=-]* ]]; then
             printf '%s' "$pass"
             return 0
         fi
     done
+    [[ $pass == [A-Za-z0-9]* ]] || pass="P${pass:1}"
     printf '%s' "$pass"
 }
 
@@ -479,13 +483,27 @@ create_database() {
         DB_USER="${CP_USER}_wp"
         local out
         echo -en "${BLUE}Creating database... ${NC}"
+        # An earlier run that aborted half-way can leave the database or the user
+        # behind, so both are reused rather than treated as a failure; the
+        # existing user is simply given the new password.
         out=$(uapi --output=json --user="$CP_USER" Mysql create_database name="$DB_NAME" 2>&1)
         if ! echo "$out" | grep -q '"errors":null'; then
-            echo -e "${RED}ERROR${NC}"; echo "$out"; return 1
+            if echo "$out" | grep -qi 'already exists'; then
+                echo -en "${YELLOW}database already exists, reusing... ${NC}"
+            else
+                echo -e "${RED}ERROR${NC}"; echo "$out"; return 1
+            fi
         fi
         out=$(uapi --output=json --user="$CP_USER" Mysql create_user name="$DB_USER" password="$DB_PASS" 2>&1)
         if ! echo "$out" | grep -q '"errors":null'; then
-            echo -e "${RED}ERROR${NC}"; echo "$out"; return 1
+            if echo "$out" | grep -qi 'already exists'; then
+                echo -en "${YELLOW}user already exists, resetting password... ${NC}"
+                out=$(uapi --output=json --user="$CP_USER" Mysql set_password \
+                      user="$DB_USER" password="$DB_PASS" 2>&1)
+            fi
+            if ! echo "$out" | grep -q '"errors":null'; then
+                echo -e "${RED}ERROR${NC}"; echo "$out"; return 1
+            fi
         fi
         out=$(uapi --output=json --user="$CP_USER" Mysql set_privileges_on_database \
               user="$DB_USER" database="$DB_NAME" privileges=ALL 2>&1)

@@ -312,7 +312,7 @@
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.1</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.4.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.0</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.0</span></button>
@@ -320,6 +320,20 @@
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-09-03 ============ -->
+            <article class="entry" data-script="wp-core" data-date="2026-09-03">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.6.1</span><time datetime="2026-09-03">2026-09-03</time>
+                </div>
+                <ul class="en">
+                    <li>Fixed a fresh install failing on cPanel with <code>Cpanel::Exception::IO::FileNotFound</code> when the generated database password happened to start with <code>@</code>. cPanel&#39;s <code>apitool</code> reads an argument value beginning with <code>@</code> as <code>@filename</code> and tries to load that file, so <code>Mysql create_user</code> died before the database user was ever created. Generated passwords now always start with a letter or a digit — the rest of the character set, symbols included, is unchanged, so nothing is lost in strength.</li>
+                    <li>A fresh install no longer trips over leftovers from a half-finished run: an existing database is reused and an existing database user is kept and given the new password (<code>Mysql set_password</code>) instead of aborting with &ldquo;already exists&rdquo;. Both cases are announced on the progress line.</li>
+                </ul>
+                <ul class="fa">
+                    <li>رفع خطای نصب تازه روی cPanel با پیام <code>Cpanel::Exception::IO::FileNotFound</code> وقتی رمز تولیدشدهٔ دیتابیس تصادفاً با <code>@</code> شروع می‌شد. ابزار <code>apitool</code> در cPanel مقداری را که با <code>@</code> شروع شود به‌عنوان <code>@filename</code> می‌خواند و سعی می‌کند آن فایل را باز کند، برای همین <code>Mysql create_user</code> پیش از ساخته‌شدن کاربر دیتابیس شکست می‌خورد. حالا رمزهای تولیدی همیشه با حرف یا رقم شروع می‌شوند — بقیهٔ مجموعهٔ کاراکترها از جمله نمادها دست‌نخورده است و چیزی از قدرت رمز کم نمی‌شود.</li>
+                    <li>نصب تازه دیگر با باقی‌ماندهٔ یک اجرای ناتمام گیر نمی‌کند: دیتابیسِ موجود دوباره استفاده می‌شود و کاربرِ موجود هم نگه داشته شده و رمز جدید روی آن ست می‌شود (<code>Mysql set_password</code>) به‌جای اینکه کار با پیام &laquo;already exists&raquo; متوقف شود. هر دو حالت روی خط پیشرفت اعلام می‌شوند.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-09-02 ============ -->
             <article class="entry" data-script="wp-core" data-date="2026-09-02">
