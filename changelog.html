@@ -310,16 +310,85 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.1</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.4.0</span></button>
-            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.0</span></button>
-            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.0</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.1</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.1</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.2</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.4.1</span></button>
+            <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
+            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.1</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.1.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-09-25 ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.10.1</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>Fixed <strong>cancelling</strong> a scan, most noticeably in linear automate mode, where Ctrl+C is the only way out. Ctrl+C also killed the logging <code>tee</code>, so the cancel handler&#39;s messages never appeared and the scan looked like it hadn&#39;t stopped. The logger now ignores Ctrl+C and records the restore through to the end. A second Ctrl+C can no longer interrupt a restore that is already running. The hunt&#39;s opening hint now says Ctrl+C in automate mode instead of the <code>c</code> answer that mode never asks for.</li>
+                    <li>Cancelling, or bailing out on a broken baseline, now restores only the plugins the scan itself disabled. Plugins that were already <code>.off</code> before the run stay disabled; previously they were re-enabled as well.</li>
+                </ul>
+                <ul class="fa">
+                    <li>رفع مشکل <strong>کنسل‌کردن</strong> اسکن، به‌خصوص در حالت خطی خودکار که تنها راه خروج Ctrl+C است. Ctrl+C فرایند <code>tee</code> مربوط به لاگ را هم از کار می‌انداخت، برای همین پیام‌های کنسل هیچ‌وقت نمایش داده نمی‌شد و به نظر می‌رسید اسکن متوقف نشده. حالا لاگر Ctrl+C را نادیده می‌گیرد و بازگردانی را تا انتها ثبت می‌کند. Ctrl+C دوم هم دیگر نمی‌تواند وسط بازگردانی‌ای که در حال اجراست قطعش کند. پیام راهنمای شروع اسکن در حالت خودکار حالا به Ctrl+C اشاره می‌کند، نه به پاسخ <code>c</code> که آن حالت هیچ‌وقت نمی‌پرسد.</li>
+                    <li>کنسل‌کردن، یا خروج به‌خاطر خراب‌بودن سایت در حالت پایه، حالا فقط افزونه‌هایی را برمی‌گرداند که خود اسکن غیرفعال کرده بود. افزونه‌هایی که از قبل <code>.off</code> بودند غیرفعال می‌مانند؛ پیش‌تر آن‌ها هم فعال می‌شدند.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="wp-core" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.6.2</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>The run log now survives Ctrl+C. Pressing it used to kill the logging <code>tee</code> along with the script, so the tail of an interrupted run — including anything printed on the way out — was lost from both the terminal and the log file. The logger now ignores SIGINT and records everything up to the actual exit (shared logging block, same fix in every script).</li>
+                </ul>
+                <ul class="fa">
+                    <li>لاگ اجرا حالا از Ctrl+C جان سالم به در می‌برد. پیش‌تر زدن آن، <code>tee</code> مربوط به لاگ را هم همراه اسکریپت از کار می‌انداخت و انتهای یک اجرای قطع‌شده — از جمله هر چیزی که هنگام خروج چاپ می‌شد — هم از ترمینال و هم از فایل لاگ گم می‌شد. حالا لاگر SIGINT را نادیده می‌گیرد و همه‌چیز را تا لحظهٔ خروج واقعی ثبت می‌کند (بلوک مشترک لاگ؛ همین اصلاح در همهٔ اسکریپت‌ها).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="magic-move" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.4.1</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>The run log now survives Ctrl+C. Pressing it used to kill the logging <code>tee</code> along with the script, so the tail of an interrupted run — including anything printed on the way out — was lost from both the terminal and the log file. The logger now ignores SIGINT and records everything up to the actual exit (shared logging block, same fix in every script).</li>
+                </ul>
+                <ul class="fa">
+                    <li>لاگ اجرا حالا از Ctrl+C جان سالم به در می‌برد. پیش‌تر زدن آن، <code>tee</code> مربوط به لاگ را هم همراه اسکریپت از کار می‌انداخت و انتهای یک اجرای قطع‌شده — از جمله هر چیزی که هنگام خروج چاپ می‌شد — هم از ترمینال و هم از فایل لاگ گم می‌شد. حالا لاگر SIGINT را نادیده می‌گیرد و همه‌چیز را تا لحظهٔ خروج واقعی ثبت می‌کند (بلوک مشترک لاگ؛ همین اصلاح در همهٔ اسکریپت‌ها).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.7.1</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>The run log now survives Ctrl+C. Pressing it used to kill the logging <code>tee</code> along with the script, so the tail of an interrupted run — including anything printed on the way out — was lost from both the terminal and the log file. The logger now ignores SIGINT and records everything up to the actual exit (shared logging block, same fix in every script).</li>
+                </ul>
+                <ul class="fa">
+                    <li>لاگ اجرا حالا از Ctrl+C جان سالم به در می‌برد. پیش‌تر زدن آن، <code>tee</code> مربوط به لاگ را هم همراه اسکریپت از کار می‌انداخت و انتهای یک اجرای قطع‌شده — از جمله هر چیزی که هنگام خروج چاپ می‌شد — هم از ترمینال و هم از فایل لاگ گم می‌شد. حالا لاگر SIGINT را نادیده می‌گیرد و همه‌چیز را تا لحظهٔ خروج واقعی ثبت می‌کند (بلوک مشترک لاگ؛ همین اصلاح در همهٔ اسکریپت‌ها).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="perm-patrol" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="perm-patrol">perm-patrol.sh</span><span class="ver">1.3.1</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>The run log now survives Ctrl+C. Pressing it used to kill the logging <code>tee</code> along with the script, so the tail of an interrupted run — including anything printed on the way out — was lost from both the terminal and the log file. The logger now ignores SIGINT and records everything up to the actual exit (shared logging block, same fix in every script).</li>
+                </ul>
+                <ul class="fa">
+                    <li>لاگ اجرا حالا از Ctrl+C جان سالم به در می‌برد. پیش‌تر زدن آن، <code>tee</code> مربوط به لاگ را هم همراه اسکریپت از کار می‌انداخت و انتهای یک اجرای قطع‌شده — از جمله هر چیزی که هنگام خروج چاپ می‌شد — هم از ترمینال و هم از فایل لاگ گم می‌شد. حالا لاگر SIGINT را نادیده می‌گیرد و همه‌چیز را تا لحظهٔ خروج واقعی ثبت می‌کند (بلوک مشترک لاگ؛ همین اصلاح در همهٔ اسکریپت‌ها).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="fix-roundcube" data-date="2026-09-25">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.2.1</span><time datetime="2026-09-25">2026-09-25</time>
+                </div>
+                <ul class="en">
+                    <li>The run log now survives Ctrl+C. Pressing it used to kill the logging <code>tee</code> along with the script, so the tail of an interrupted run — including anything printed on the way out — was lost from both the terminal and the log file. The logger now ignores SIGINT and records everything up to the actual exit (shared logging block, same fix in every script).</li>
+                </ul>
+                <ul class="fa">
+                    <li>لاگ اجرا حالا از Ctrl+C جان سالم به در می‌برد. پیش‌تر زدن آن، <code>tee</code> مربوط به لاگ را هم همراه اسکریپت از کار می‌انداخت و انتهای یک اجرای قطع‌شده — از جمله هر چیزی که هنگام خروج چاپ می‌شد — هم از ترمینال و هم از فایل لاگ گم می‌شد. حالا لاگر SIGINT را نادیده می‌گیرد و همه‌چیز را تا لحظهٔ خروج واقعی ثبت می‌کند (بلوک مشترک لاگ؛ همین اصلاح در همهٔ اسکریپت‌ها).</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-09-03 ============ -->
             <article class="entry" data-script="wp-core" data-date="2026-09-03">

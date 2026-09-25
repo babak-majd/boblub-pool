@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.10.0
+#   Version   : 1.10.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.10.0"
+VERSION="1.10.1"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -41,7 +41,7 @@ start_log() {
     mkdir -p "$dir" 2>/dev/null
     LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
     exec 3>&1                       # keep the real stdout for the closing notice
-    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    exec > >(trap '' INT; tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1   # ignore Ctrl+C: keep logging through the script's own cancel handler
     _LOG_TEE_PID=$!
 }
 finish_log() {
@@ -298,17 +298,19 @@ if [ ${#PLUGS[@]} -eq 0 ]; then
 fi
 
 # ---------- Restore / Cancel ----------
+# Only plugins that were active when the scan started are put back; ones the
+# site already had disabled (*.off in PLUGS) stay disabled.
 restore_all(){
-    shopt -s nullglob
-    for OFF in "$PLUGINS"/*.off; do
-        [ -d "$OFF" ] || continue
-        ORIG="${OFF%.off}"
-        mv "$OFF" "$ORIG" && info "Restored: $(basename "$ORIG")"
+    local NAME
+    for NAME in "${PLUGS[@]}"; do
+        [[ "$NAME" == *.off ]] && continue
+        [ -d "$PLUGINS/$NAME.off" ] && [ ! -e "$PLUGINS/$NAME" ] || continue
+        mv "$PLUGINS/$NAME.off" "$PLUGINS/$NAME" && info "Restored: $NAME"
     done
-    shopt -u nullglob
 }
 
 cancel_scan(){
+    trap '' INT TERM                # a second Ctrl+C must not interrupt the restore
     echo
     info "Cancelling scan — restoring all plugins to their original state..."
     [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$PH_EDITED_CFG"
@@ -319,6 +321,15 @@ cancel_scan(){
 
 # On Ctrl+C / TERM, leave the site exactly as we found it.
 trap cancel_scan INT TERM
+
+# Automate mode never prompts during the hunt, so Ctrl+C is its only way out.
+cancel_hint(){
+    if [[ "$MODE" == "manual" ]]; then
+        info "(At any prompt, enter 'c' — or press Ctrl+C — to cancel and restore all plugins.)"
+    else
+        info "(Press Ctrl+C at any time to cancel and restore all plugins.)"
+    fi
+}
 
 # ---------- Domain (automate mode only) ----------
 # Automate mode needs a domain for the HTTP health check. Reuse the one entered
@@ -523,7 +534,7 @@ linear_search() {
 
     echo
     info "Linear search over ${#PLUGS[@]} plugin(s)."
-    info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
+    cancel_hint
 
     disable_all
     verify_baseline
@@ -655,7 +666,7 @@ binary_search() {
 
     echo
     info "Binary search over ${#candidates[@]} plugin(s)."
-    info "(At any prompt, enter 'c' to cancel and restore all plugins.)"
+    cancel_hint
 
     disable_all
     verify_baseline

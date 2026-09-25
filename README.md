@@ -56,7 +56,7 @@ sudo ./wp-core.sh
 
 Every script prints its version in its terminal header. Full per-script release history lives in the bilingual changelog: **[material.bobclub.ir/changelog](https://material.bobclub.ir/changelog)**.
 
-**Logging.** Every run is logged under `/var/log/<script-name>/`, in a per-target sub-directory (the domain, or the user, depending on the script) with one timestamped file per run — e.g. `/var/log/plugin-hunter/site.ir/2026-08-22_14-30-05.log`. When `/var/log` isn't writable (you're not root), it falls back to the same layout under `/tmp`. Each script prints the exact log path when it finishes.
+**Logging.** Every run is logged under `/var/log/<script-name>/`, in a per-target sub-directory (the domain, or the user, depending on the script) with one timestamped file per run — e.g. `/var/log/plugin-hunter/site.ir/2026-08-22_14-30-05.log`. When `/var/log` isn't writable (you're not root), it falls back to the same layout under `/tmp`. Each script prints the exact log path when it finishes — even when you stop it with Ctrl+C, the log keeps everything up to the exit.
 
 ---
 
@@ -174,7 +174,7 @@ Any flag you leave out is simply asked for interactively. Run `./pro-plugin-mana
 
 **Finds the one plugin that's killing the site.** The classic scenario: white screen or HTTP 500, no error in the logs, 40 plugins installed, and you have no idea which one.
 
-It disables plugins by renaming their folders (`plugin-name` → `plugin-name.off`). WordPress simply stops seeing them. **Nothing is deleted**, and everything is renamed back at the end — or immediately, if you cancel.
+It disables plugins by renaming their folders (`plugin-name` → `plugin-name.off`). WordPress simply stops seeing them. **Nothing is deleted**, and everything is renamed back at the end — or immediately, if you cancel. To cancel, answer `c` at any prompt (manual mode) or press **Ctrl+C** at any time (either mode); only the plugins the scan itself turned off are put back, so ones that were already `.off` stay disabled.
 
 ### Two choices when it starts:
 

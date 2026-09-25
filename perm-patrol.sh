@@ -7,9 +7,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.3.0
+#   Version   : 1.3.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.3.0"
+VERSION="1.3.1"
 
 set -u
 
@@ -43,7 +43,7 @@ start_log() {
     mkdir -p "$dir" 2>/dev/null
     LOG_FILE="${dir}/$(date +%F_%H-%M-%S).log"
     exec 3>&1                       # keep the real stdout for the closing notice
-    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1
+    exec > >(trap '' INT; tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG_FILE")) 2>&1   # ignore Ctrl+C: keep logging through the script's own cancel handler
     _LOG_TEE_PID=$!
 }
 finish_log() {
