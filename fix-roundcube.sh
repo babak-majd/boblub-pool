@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.2.1
+#   Version   : 1.2.2
 # ════════════════════════════════════════════════════════════
-VERSION="1.2.1"
+VERSION="1.2.2"
 
 # pipefail: a pipeline (e.g. `mysql ... | tee`) now reports the LEFT command's
 # failure instead of tee's success — this is what was masking real DB errors.
@@ -76,6 +76,10 @@ MYSQL_DATA_DIR="/var/lib/mysql"
 
 TIMESTAMP=$(date +%F_%H-%M-%S)
 BACKUPFILE="/root/${DBNAME}_backup_${TIMESTAMP}.sql"
+
+# Prefer the mariadb client/dumper over the deprecated mysql names when present.
+DB_CLI="mysql"
+DB_DUMP="mysqldump"
 
 # ======== LOGGING  (standard block — identical across all bobclub scripts) ========
 # One directory per script under /var/log, a sub-directory per target (the domain
@@ -153,6 +157,12 @@ detect_service() {
 # Detect the MySQL socket. The 2002 error happened because the client defaulted
 # to /tmp/mysql.sock while the server listens elsewhere. Prefer my.cnf, then the
 # usual DirectAdmin/DEB/RPM locations; only return one that actually exists.
+# Prefer the mariadb client/dumper over the deprecated mysql/mysqldump names.
+detect_db_client() {
+    command -v mariadb      >/dev/null 2>&1 && DB_CLI="mariadb"
+    command -v mariadb-dump >/dev/null 2>&1 && DB_DUMP="mariadb-dump"
+}
+
 detect_socket() {
     local cnf_sock s
     cnf_sock=$(grep -hoP '^\s*socket\s*=\s*\K\S+' \
@@ -195,11 +205,13 @@ SOCK=$(detect_socket) && log "${GREEN}✅ MySQL socket:${RESET} ${BOLD}$SOCK${RE
                       || log "${YELLOW}⚠️ No MySQL socket found — using client default.${RESET}"
 MYSQL_CONN=(-u "$DBUSER" -p"$DBPASS")
 [ -n "$SOCK" ] && MYSQL_CONN+=(--socket="$SOCK")
+detect_db_client
+log "${GREEN}✅ DB client:${RESET} ${BOLD}$DB_CLI${RESET}"
 
 # ======== BACKUP ========
 log "${MAGENTA}${BOLD}📦 Attempting backup of database:${RESET} $DBNAME"
 
-if mysqldump "${MYSQL_CONN[@]}" "$DBNAME" 2>&1 > "$BACKUPFILE"; then
+if "$DB_DUMP" "${MYSQL_CONN[@]}" "$DBNAME" 2>&1 > "$BACKUPFILE"; then
     log "${GREEN}✅ Backup created:${RESET} $BACKUPFILE"
 else
     log "${YELLOW}⚠️ Backup failed — database may not exist. Continuing...${RESET}"
@@ -209,7 +221,7 @@ fi
 # ======== DROP DATABASE ========
 log "${MAGENTA}${BOLD}🗑️ Dropping database:${RESET} $DBNAME"
 
-if run_logged mysql "${MYSQL_CONN[@]}" -e "DROP DATABASE IF EXISTS \`${DBNAME}\`;"; then
+if run_logged "$DB_CLI" "${MYSQL_CONN[@]}" -e "DROP DATABASE IF EXISTS \`${DBNAME}\`;"; then
     log "${GREEN}✅ DROP DATABASE executed successfully.${RESET}"
 else
     STATUS=1

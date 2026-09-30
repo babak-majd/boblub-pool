@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.7.1
+#   Version   : 1.7.2
 # ════════════════════════════════════════════════════════════
-VERSION="1.7.1"
+VERSION="1.7.2"
 
 
 #############################################
@@ -65,6 +65,12 @@ ControlPanel=""
 OWNER=""
 GROUP=""
 WP_CMD=""
+DB_CLI="mysql"      # prefer the mariadb client when present (detect_db_client)
+
+# Prefer the mariadb client over the deprecated 'mysql' name when present.
+detect_db_client() {
+    command -v mariadb >/dev/null 2>&1 && DB_CLI="mariadb"
+}
 
 # DB credentials (filled by parse_wp_config)
 DB_NAME=""
@@ -753,7 +759,7 @@ db_search_replace() {
         [[ -n "$DB_PORT" ]] && echo "port=$DB_PORT"
     } > "$deffile"
 
-    local MYSQL="mysql --defaults-extra-file=$deffile"
+    local MYSQL="$DB_CLI --defaults-extra-file=$deffile"
 
     if ! $MYSQL -e "USE \`$DB_NAME\`;" >/dev/null 2>&1; then
         echo -e "${RED}✘ Cannot connect to database '$DB_NAME'.${NC}"
@@ -884,6 +890,7 @@ show_menu() {
 main() {
     print_header
     resolve_webroot || exit 1
+    detect_db_client
     start_log "${DOMAIN:-$(basename "$WEBROOT")}"
 
     # A feature flag skips the main menu; otherwise ask.

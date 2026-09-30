@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.6.2
+#   Version   : 1.6.3
 # ════════════════════════════════════════════════════════════
-VERSION="1.6.2"
+VERSION="1.6.3"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -631,6 +631,12 @@ WPDB_PREFIX="wp_"
 WPDB_MULTISITE=""
 WPDB_READY=""
 WPDB_ARGS=()
+DB_CLI="mysql"        # prefer the mariadb client when present (detect_db_client)
+
+# Prefer the mariadb client over the deprecated 'mysql' name when present.
+detect_db_client() {
+    command -v mariadb >/dev/null 2>&1 && DB_CLI="mariadb"
+}
 
 # Value of a define('NAME', 'value') in wp-config.php. Both quote styles are
 # accepted and their PHP escapes are decoded, so a password holding a backslash
@@ -657,7 +663,7 @@ sql_escape() {
 # --no-defaults keeps a stray ~/.my.cnf from hijacking the credentials, and
 # MYSQL_PWD keeps the password out of the process list.
 wpdb_query() {
-    MYSQL_PWD="$WPDB_PASS" mysql --no-defaults -u "$WPDB_USER" "${WPDB_ARGS[@]}" \
+    MYSQL_PWD="$WPDB_PASS" "$DB_CLI" --no-defaults -u "$WPDB_USER" "${WPDB_ARGS[@]}" \
         -N -B --connect-timeout=10 "$WPDB_NAME"
 }
 
@@ -670,7 +676,8 @@ wpdb_init() {
     WPDB_READY="no"
 
     [[ -f "wp-config.php" ]] || return 1
-    command -v mysql >/dev/null 2>&1 || return 1
+    detect_db_client
+    command -v "$DB_CLI" >/dev/null 2>&1 || return 1
 
     WPDB_NAME=$(wpconf_define DB_NAME)
     WPDB_USER=$(wpconf_define DB_USER)
@@ -728,8 +735,8 @@ wpdb_require() {
     wpdb_init && return 0
     if [[ ! -f "wp-config.php" ]]; then
         echo -e "${RED}✘ wp-config.php not found — cannot reach the database.${NC}"
-    elif ! command -v mysql >/dev/null 2>&1; then
-        echo -e "${RED}✘ No mysql client found; admin management needs one.${NC}"
+    elif ! command -v "$DB_CLI" >/dev/null 2>&1; then
+        echo -e "${RED}✘ No mysql/mariadb client found; admin management needs one.${NC}"
     else
         echo -e "${RED}✘ Could not connect with the credentials in wp-config.php.${NC}"
     fi
