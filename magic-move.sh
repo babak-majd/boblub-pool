@@ -4,13 +4,17 @@
 #   Two-pass migration verifier. Run on the SOURCE to snapshot
 #   every account's status, then on the DESTINATION to re-check
 #   and heal broken PHP sites — proving the move came across clean.
+#   Before the first rsync, a PREP step stops SecCheck and the
+#   scanner services, whitelists the peer IP in CSF, and (on the
+#   destination) opens SSH root login — with a ready-to-paste
+#   block printed for the destination, source IP already in it.
 # ────────────────────────────────────────────────────────────
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.5.0
+#   Version   : 2.6.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.5.0"
+VERSION="2.6.0"
 
 set -u
 
@@ -68,7 +72,7 @@ success(){ echo -e "${GREEN}[OK]${RESET} $*"; }
 error(){ echo -e "${RED}[ERROR]${RESET} $*"; }
 
 # ---------- Defaults ----------
-MODE=""                       # source | destination — prompted when unset
+MODE=""                       # source | destination | sync | prep — prompted when unset
 PANEL=""                      # cpanel | directadmin — auto-detected / forced
 SERVER_IP=""                  # this server's IP; auto-detected default, prompted
 RESELLER=""                   # source: only accounts owned by this reseller
@@ -95,6 +99,12 @@ SYNC=""                       # source: yes = rsync the selected accounts' home
                               # don't. Empty means neither flag: ask.
 SYNC_IP=""                    # sync: destination server IP/host — prompted
 SYNC_PORT=""                  # sync: destination SSH port — prompted (default 22)
+PREP=""                       # migration prep: yes = run without asking; skip =
+                              # already prepared, don't run; empty = ask.
+PREP_GIVEN=0                  # --prep was given (makes --prep alone a mode)
+PREP_SIDE=""                  # standalone prep: source | destination (from
+                              # --source / --destination; asked for when empty)
+PEER_IP=""                    # prep: the OTHER server's IP to whitelist here
 
 # ---------- Usage ----------
 usage() {
@@ -124,12 +134,26 @@ A migration is verified in two passes:
                   there) are not copied; they are listed in
                   <outdir>/sync-skipped.csv.
 
+  PREP            Before the first rsync, both servers are prepared: SecCheck is
+                  stopped & disabled (cron entries quarantined, /etc/SecCheck
+                  moved away), the scanner services (clamd@scan, clamav-freshclam,
+                  cxswatch, rspamd, spamd) are stopped & disabled, "ALL: ALL" is
+                  commented out of hosts.deny, and the peer's IP is whitelisted
+                  in CSF. The destination additionally opens SSH root login.
+                  During a sync flow the source asks first; it then prints a
+                  complete ready-to-paste block for the destination with the
+                  source IP already in it, and waits for Enter before syncing.
+                  --prep runs it standalone (no sync), --skip-prep skips it
+                  entirely for servers that are already prepared.
+
 Every domain is probed with all hostnames pinned to this server, so a redirect
 to www/a subdomain follows onto the box we are testing, not wherever DNS points.
 
 Options:
-      --source            This is the source server (snapshot only).
-      --destination       This is the destination server (verify + heal).
+      --source            This is the source server (snapshot only). With --prep:
+                          prep THIS server as the source, then exit.
+      --destination       This is the destination server (verify + heal). With
+                          --prep: prep THIS server as the destination, then exit.
   -i, --ip <ip>           Server IP to pin every domain to. Prompted for, with
                           the auto-detected IP as default, when omitted.
   -f, --file <path|url>   DESTINATION: the CSV from the source pass (path or URL).
@@ -148,7 +172,7 @@ Options:
                           neither this nor --no-ns is given.
       --no-ns             SOURCE: do not look up nameservers (no CSV columns).
   -o, --outdir <dir>      Output folder for migration.csv + snapshots/.
-                          (default: magic-move-source / magic-move-dest)
+                          (default: magic-move)
   -p, --php-versions <v>  DESTINATION: cascade to try, in order. (default: "$PHP_VERSIONS")
   -n, --dry-run           DESTINATION: check & record only; never switch PHP,
                           never disable a plugin.
@@ -163,6 +187,14 @@ Options:
       --no-sync           SOURCE: do not offer the rsync.
       --dest-ip <ip>      Sync target server (asked for when omitted).
       --dest-port <port>  Sync target SSH port (asked for; default 22).
+      --prep              Prep only: prepare THIS server (side picked from
+                          --source / --destination, or asked), then exit. Inside
+                          a sync flow (--sync / --with-sync) it forces the prep
+                          step instead of asking.
+      --skip-prep         SOURCE/SYNC: both servers are already prepared — run
+                          no prep and print no destination block.
+      --peer-ip <ip>      PREP: the OTHER server's IP to whitelist on this one
+                          (asked for when omitted).
       --cpanel            Force the cPanel account detector.
       --directadmin       Force the DirectAdmin account detector.
   -h, --help              Show this help and exit.
@@ -174,6 +206,9 @@ Examples:
   magic-move.sh --source --snapshot -u "bobuser, shopuser"
   magic-move.sh --source --list-only --with-sync --dest-ip 203.0.113.7 --dest-port 3131
   magic-move.sh --sync -f magic-move/migration.csv
+  magic-move.sh --sync --skip-prep -f magic-move/migration.csv
+  magic-move.sh --prep --source --peer-ip 203.0.113.7
+  magic-move.sh --prep --destination --peer-ip 198.51.100.3
   magic-move.sh --destination -f migration.csv
   magic-move.sh --destination -f https://host/migration.csv --dry-run
   magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
@@ -221,6 +256,11 @@ while [ $# -gt 0 ]; do
         --dest-port)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             SYNC_PORT="$2"; shift 2 ;;
+        --prep)          PREP="yes"; PREP_GIVEN=1; shift ;;
+        --skip-prep)     PREP="skip"; shift ;;
+        --peer-ip)
+            [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
+            PEER_IP="$2"; shift 2 ;;
         --cpanel)        PANEL="cpanel"; shift ;;
         --directadmin)   PANEL="directadmin"; shift ;;
         -h|--help)       usage; exit 0 ;;
@@ -229,6 +269,15 @@ while [ $# -gt 0 ]; do
         *)               error "Unexpected argument: $1"; usage; exit 1 ;;
     esac
 done
+
+# --prep alone (or with --source/--destination) is its own mode: prep this
+# server, then exit — unless a sync flow was asked for, where it just forces
+# the prep step instead of asking about it.
+if [ "$PREP_GIVEN" = 1 ] && [ "$MODE" != "sync" ] && [ "$SYNC" != "yes" ]; then
+    PREP_SIDE="$MODE"
+    [ "$PREP_SIDE" = "source" ] || [ "$PREP_SIDE" = "destination" ] || PREP_SIDE=""
+    MODE="prep"
+fi
 
 print_header() {
     local C='\033[1;36m' Y='\033[1;33m' B='\033[1m' N='\033[0m'
@@ -260,11 +309,13 @@ if [ -z "$MODE" ]; then
     echo "  1) source       — read this server's accounts (list only, or full snapshot)"
     echo "  2) destination  — re-check and heal broken PHP sites"
     echo "  3) sync only    — rsync selected accounts' homes to the destination"
-    read -r -p "Enter choice (1-3): " MODE_CHOICE
+    echo "  4) prep only    — stop SecCheck/scanners & whitelist the peer (no sync)"
+    read -r -p "Enter choice (1-4): " MODE_CHOICE
     case "$MODE_CHOICE" in
         1) MODE="source" ;;
         2) MODE="destination" ;;
         3) MODE="sync" ;;
+        4) MODE="prep" ;;
         *) error "Invalid choice."; exit 1 ;;
     esac
 fi
@@ -303,7 +354,7 @@ fi
 # in a single move and both passes accumulate into it:
 #   magic-move/
 #     snapshots/before/   (source)   snapshots/after/  (destination)
-#     migration.csv       report.txt
+#     migration.csv       report.txt   destination-prep.sh
 [ -n "$OUT_DIR" ] || OUT_DIR="magic-move"
 OUT_CSV="$OUT_DIR/migration.csv"
 SNAP_DIR="$OUT_DIR/snapshots"
@@ -326,8 +377,10 @@ detect_server_ip() {
 }
 
 # ---------- Prompt: Server IP ----------
-# Nothing is fetched in list-only or sync mode, so the IP is neither needed nor asked for.
-if [ "$LIST_ONLY" != "yes" ] && [ "$MODE" != "sync" ]; then
+# Nothing is fetched in list-only, sync or prep mode, so the IP is neither
+# needed nor asked for. (Prep finds this server's IP on its own when it needs
+# to embed it in the destination block.)
+if [ "$LIST_ONLY" != "yes" ] && [ "$MODE" != "sync" ] && [ "$MODE" != "prep" ]; then
     if [ -z "$SERVER_IP" ]; then
         DETECTED_IP=$(detect_server_ip)
         if [ -n "$DETECTED_IP" ]; then
@@ -748,6 +801,317 @@ select_accounts() {
 }
 
 # ════════════════════════════════════════════════════════════
+#   MIGRATION PREP (SecCheck / scanners / firewall / ssh)
+# ════════════════════════════════════════════════════════════
+# SecCheck re-enables itself between passes and the destination's firewall would
+# drop the rsync, so both servers are prepared before the first byte moves:
+#   both sides : SecCheck off (cron quarantined, /etc/SecCheck moved away),
+#                scanners stopped & disabled, hosts.deny "ALL: ALL" commented,
+#                the peer's IP whitelisted in CSF.
+#   destination: + SSH root login (PermitRootLogin/PasswordAuthentication yes,
+#                AllowUsers root), validated with sshd -t before any restart.
+# Every step is idempotent and keeps a backup, so re-runs and re-pastes are safe.
+
+disable_seccheck() {
+    systemctl stop SecCheck OnlineSecCheck.timer OnlineSecCheck.service 2>/dev/null
+    systemctl disable SecCheck OnlineSecCheck.timer OnlineSecCheck.service 2>/dev/null
+    # Quarantine the cron entries that resurrect it — only *uncommented* lines,
+    # so re-runs never stack a second '#'. A copy of the crontab is kept first.
+    if crontab -l > "$OUT_DIR/crontab.before-magic-move.bak" 2>/dev/null; then
+        crontab -l 2>/dev/null \
+            | sed -E '/(SecCheck_Installer|systemctl restart SecCheck)/{/^[[:space:]]*#/!s/^/#/}' \
+            | crontab -
+        log "PREP seccheck: cron entries commented (backup: $OUT_DIR/crontab.before-magic-move.bak)"
+    fi
+    systemctl stop SecCheck.service 2>/dev/null
+    if [ -d /etc/SecCheck ]; then
+        local tgt="/etc/SecCheck-old"
+        [ -e "$tgt" ] && tgt="/etc/SecCheck-old.$(date +%s)"
+        mv /etc/SecCheck "$tgt" 2>/dev/null \
+            && log "PREP seccheck: /etc/SecCheck -> $tgt"
+    fi
+    log "PREP seccheck: stopped & disabled"
+}
+
+stop_scanners() {
+    local s
+    for s in clamd@scan clamav-freshclam cxswatch rspamd spamd; do
+        systemctl stop "$s" 2>/dev/null
+        systemctl disable "$s" 2>/dev/null
+    done
+    # DirectAdmin: mark them OFF so the panel stops monitoring/restarting them.
+    local ss="/usr/local/directadmin/data/admin/services.status"
+    if [ -f "$ss" ]; then
+        sed -i -E 's/^(rspamd|clamd@scan|clamav-freshclam)=ON/\1=OFF/' "$ss" 2>/dev/null
+    fi
+    log "PREP scanners: stopped & disabled (clamd@scan, clamav-freshclam, cxswatch, rspamd, spamd)"
+}
+
+allow_hosts_deny() {
+    [ -f /etc/hosts.deny ] || return 0
+    if grep -Eq '^[[:space:]]*ALL[[:space:]]*:[[:space:]]*ALL' /etc/hosts.deny; then
+        [ -f /etc/hosts.deny.bak ] || cp -p /etc/hosts.deny /etc/hosts.deny.bak
+        sed -i '/ALL[[:space:]]*:[[:space:]]*ALL/{/^[[:space:]]*#/!s/^/#/}' /etc/hosts.deny
+        success "hosts.deny: ALL: ALL commented (backup: /etc/hosts.deny.bak)"
+        log "PREP hosts.deny: ALL: ALL commented"
+    else
+        info "hosts.deny: no active ALL: ALL — nothing to do"
+    fi
+}
+
+allow_in_firewall() {   # $1 = peer IP to whitelist on THIS server
+    local ip="$1" esc
+    esc="${ip//./\\.}"
+    if command -v csf >/dev/null 2>&1; then
+        if grep -qE "^${esc}([[:space:]]|$)" /etc/csf/csf.allow 2>/dev/null; then
+            info "CSF: $ip is already allowed"
+        else
+            if csf -a "$ip" >/dev/null 2>&1; then
+                success "CSF: $ip allowed"
+            else
+                error "CSF: could not add $ip — add it manually"
+            fi
+        fi
+        csf -r >/dev/null 2>&1
+        log "PREP firewall: $ip allowed, csf reloaded"
+    else
+        info "CSF not found — make sure $ip is allowed in the firewall manually."
+        log "PREP firewall: csf missing, manual action needed for $ip"
+    fi
+}
+
+open_ssh_root() {
+    local cfg="/etc/ssh/sshd_config" K
+    if [ ! -f "$cfg" ]; then
+        error "sshd_config not found — enable root SSH manually."
+        return 1
+    fi
+    [ -f "$cfg.bak" ] || cp -p "$cfg" "$cfg.bak"
+    # Replace existing directives in place; append only when absent (sshd honours
+    # the FIRST occurrence, so commented defaults are safe to append after).
+    for K in PermitRootLogin PasswordAuthentication; do
+        if grep -Eqi "^[[:space:]]*$K[[:space:]]" "$cfg"; then
+            sed -i -E "s/^[[:space:]]*$K[[:space:]].*/$K yes/I" "$cfg"
+        else
+            echo "$K yes" >> "$cfg"
+        fi
+    done
+    # AllowUsers: root must be on the FIRST AllowUsers line, so extend it rather
+    # than appending a second directive sshd would ignore.
+    if grep -Eqi '^[[:space:]]*AllowUsers[[:space:]]' "$cfg"; then
+        grep -Eqi '^[[:space:]]*AllowUsers[[:space:]].*\broot\b' "$cfg" || \
+            sed -i -E 's/^([[:space:]]*AllowUsers[[:space:]].*)$/\1 root/I' "$cfg"
+    else
+        echo "AllowUsers root" >> "$cfg"
+    fi
+    # Validate BEFORE restarting: a broken config must never cost us the session.
+    local SSHD_BIN
+    SSHD_BIN=$(command -v sshd 2>/dev/null || printf '/usr/sbin/sshd')
+    if "$SSHD_BIN" -t 2>/dev/null; then
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null \
+            || service sshd restart >/dev/null 2>&1
+        if systemctl is-active --quiet sshd 2>/dev/null || systemctl is-active --quiet ssh 2>/dev/null; then
+            success "SSH: root login enabled, sshd restarted (backup: $cfg.bak)"
+            log "PREP sshd: root login enabled, restarted"
+        else
+            error "SSH restarted but its state is unknown — verify you can still log in!"
+            log "PREP sshd: restarted, state unknown"
+        fi
+    else
+        cp -f "$cfg.bak" "$cfg"
+        error "sshd -t failed after the edit — backup restored, sshd NOT restarted."
+        log "PREP sshd: config test failed, backup restored"
+        return 1
+    fi
+}
+
+run_prep() {   # $1 = side (source|destination)   $2 = peer IP to whitelist here
+    [ "$(id -u)" = 0 ] || { error "Prep must run as root."; return 1; }
+    local side="$1" peer="$2"
+    echo
+    info "Prep on this ${side} — whitelisting peer ${peer}"
+    disable_seccheck
+    stop_scanners
+    allow_hosts_deny
+    allow_in_firewall "$peer"
+    if [ "$side" = "destination" ]; then
+        open_ssh_root
+    fi
+    echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    echo -e "  ${GREEN}Prep done on this server${RESET}"
+    echo -e "   - SecCheck stopped & disabled (cron entries quarantined)"
+    echo -e "   - Scanners stopped & disabled (clamd@scan, freshclam, cxswatch, rspamd, spamd)"
+    echo -e "   - hosts.deny checked"
+    echo -e "   - CSF: $peer allowed"
+    [ "$side" = "destination" ] && echo -e "   - SSH root login enabled"
+    echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    log "PREP done side=$side peer=$peer"
+    echo
+}
+
+# This server's IP as the DESTINATION must see it (for the block's whitelist):
+# panel record / route table first, and a public-IP lookup when only a private
+# address is visible (NAT). Confirmed interactively — whitelisting the wrong IP
+# would lock the sync out.
+prep_source_ip() {
+    local ip="$SERVER_IP" pub ans
+    [ -z "$ip" ] && ip=$(detect_server_ip)
+    case "$ip" in ""|10.*|192.168.*|127.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
+        if command -v curl >/dev/null 2>&1; then
+            pub=$(curl -4ks --max-time 6 https://api.ipify.org 2>/dev/null) \
+                || pub=$(curl -4ks --max-time 6 http://ifconfig.me 2>/dev/null)
+            [ -n "$pub" ] && ip="$pub"
+        fi
+    ;; esac
+    if [ -t 0 ]; then
+        read -r -p "Source IP to whitelist on the destination [$ip]: " ans
+        ip="${ans:-$ip}"
+    fi
+    case "$ip" in
+        [0-9A-Fa-f]*|:[0-9A-Fa-f]*) [[ "$ip" =~ ^[0-9A-Fa-f:.]+$ ]] && { printf '%s' "$ip"; return 0; } ;;
+    esac
+    return 1
+}
+
+# The destination block: complete, prompt-free, idempotent, with the source IP
+# already in it. Written once to a file (so it can be scp'd too) and printed for
+# pasting. __SRC_IP__ is substituted after the quoted heredoc.
+write_destination_block() {   # $1 = source IP   $2 = output path
+    cat > "$2" <<'MMBLOCK'
+#!/bin/bash
+# ════════════════════════════════════════════════════════════
+#   Magic Move — DESTINATION prep (generated on the source)
+#   Whitelists the source, stops SecCheck + scanners, opens SSH root.
+#   Safe to re-run; backups are kept next to every edited file.
+# ════════════════════════════════════════════════════════════
+SRC_IP="__SRC_IP__"
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+echo "── Magic Move — destination prep (source: $SRC_IP) ──"
+
+# 1) SecCheck — stop, disable, quarantine its cron, move its directory
+systemctl stop SecCheck OnlineSecCheck.timer OnlineSecCheck.service 2>/dev/null
+systemctl disable SecCheck OnlineSecCheck.timer OnlineSecCheck.service 2>/dev/null
+if crontab -l > /root/crontab.magicmove.bak 2>/dev/null; then
+    crontab -l 2>/dev/null | sed -E '/(SecCheck_Installer|systemctl restart SecCheck)/{/^[[:space:]]*#/!s/^/#/}' | crontab -
+    echo "   SecCheck cron entries commented (backup: /root/crontab.magicmove.bak)"
+fi
+systemctl stop SecCheck.service 2>/dev/null
+if [ -d /etc/SecCheck ]; then
+    T="/etc/SecCheck-old"; [ -e "$T" ] && T="/etc/SecCheck-old.$(date +%s)"
+    mv /etc/SecCheck "$T" 2>/dev/null && echo "   /etc/SecCheck moved to $T"
+fi
+
+# 2) Scanners / anti-spam — stop & disable
+for s in clamd@scan clamav-freshclam cxswatch rspamd spamd; do
+    systemctl stop "$s" 2>/dev/null
+    systemctl disable "$s" 2>/dev/null
+done
+SS="/usr/local/directadmin/data/admin/services.status"
+if [ -f "$SS" ]; then
+    sed -i -E 's/^(rspamd|clamd@scan|clamav-freshclam)=ON/\1=OFF/' "$SS"
+fi
+echo "   Scanners stopped & disabled (clamd@scan, freshclam, cxswatch, rspamd, spamd)"
+
+# 3) hosts.deny — unblock everyone
+if [ -f /etc/hosts.deny ] && grep -Eq '^[[:space:]]*ALL[[:space:]]*:[[:space:]]*ALL' /etc/hosts.deny; then
+    [ -f /etc/hosts.deny.bak ] || cp -p /etc/hosts.deny /etc/hosts.deny.bak
+    sed -i '/ALL[[:space:]]*:[[:space:]]*ALL/{/^[[:space:]]*#/!s/^/#/}' /etc/hosts.deny
+    echo "   /etc/hosts.deny: ALL: ALL commented (backup kept)"
+fi
+
+# 4) Firewall — allow the source server
+if command -v csf >/dev/null 2>&1; then
+    if grep -qE "^${SRC_IP//./\\.}([[:space:]]|$)" /etc/csf/csf.allow 2>/dev/null; then
+        echo "   CSF: $SRC_IP already allowed"
+    else
+        csf -a "$SRC_IP" >/dev/null 2>&1 && echo "   CSF: $SRC_IP allowed" \
+            || echo "   ! CSF: could not add $SRC_IP — add it manually"
+    fi
+    csf -r >/dev/null 2>&1
+    echo "   CSF reloaded"
+else
+    echo "   ! CSF not found — allow $SRC_IP in the firewall manually"
+fi
+
+# 5) SSH — allow root login for the rsync
+CFG="/etc/ssh/sshd_config"
+if [ -f "$CFG" ]; then
+    [ -f "$CFG.bak" ] || cp -p "$CFG" "$CFG.bak"
+    for K in PermitRootLogin PasswordAuthentication; do
+        if grep -Eqi "^[[:space:]]*$K[[:space:]]" "$CFG"; then
+            sed -i -E "s/^[[:space:]]*$K[[:space:]].*/$K yes/I" "$CFG"
+        else
+            echo "$K yes" >> "$CFG"
+        fi
+    done
+    if grep -Eqi '^[[:space:]]*AllowUsers[[:space:]]' "$CFG"; then
+        grep -Eqi '^[[:space:]]*AllowUsers[[:space:]].*\broot\b' "$CFG" || \
+            sed -i -E 's/^([[:space:]]*AllowUsers[[:space:]].*)$/\1 root/I' "$CFG"
+    else
+        echo "AllowUsers root" >> "$CFG"
+    fi
+    SSHD_BIN="$(command -v sshd 2>/dev/null || echo /usr/sbin/sshd)"
+    if "$SSHD_BIN" -t 2>/dev/null; then
+        systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+        echo "   SSH: root login enabled, sshd restarted (backup: $CFG.bak)"
+    else
+        cp -f "$CFG.bak" "$CFG"
+        echo "   ! sshd config test failed — backup restored, NOT restarted"
+    fi
+else
+    echo "   ! /etc/ssh/sshd_config not found — enable root SSH manually"
+fi
+
+echo
+echo "════════════════════════════════════════════════"
+echo "  DONE — destination is ready for Magic Move."
+echo "  Now go back to the SOURCE and press Enter there."
+echo "════════════════════════════════════════════════"
+MMBLOCK
+    sed -i "s/__SRC_IP__/$1/g" "$2"
+    chmod +x "$2" 2>/dev/null
+    log "PREP destination block written: $2 (source IP: $1)"
+}
+
+print_destination_block() {   # $1 = source IP   $2 = wait for Enter? (yes|no)
+    local srcip="$1" wait="$2" block="$OUT_DIR/destination-prep.sh"
+    write_destination_block "$srcip" "$block"
+    echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    echo -e "  ${YELLOW}Run this on the DESTINATION${RESET} (paste the whole block there, press Enter):"
+    echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    cat "$block"
+    echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    echo -e "  Also saved for scp: ${YELLOW}$block${RESET}"
+    if [ "$wait" = "yes" ] && [ -t 0 ]; then
+        echo
+        read -r -p "Press Enter here once the destination block has finished... " _
+    fi
+}
+
+# Sync-flow hook: --skip-prep skips, --prep forces, otherwise ask (default yes).
+maybe_prep_source() {   # $1 = destination IP (peer)
+    if [ "$PREP" = "skip" ]; then
+        info "Skipping migration prep (--skip-prep)"
+        return 0
+    fi
+    if [ -z "$PREP" ]; then
+        if [ ! -t 0 ]; then
+            info "Non-interactive run: migration prep skipped (use --prep to force it)."
+            return 0
+        fi
+        local ans
+        echo
+        read -r -p "Run migration prep on this source & print the destination block first? [Y/n]: " ans
+        case "$ans" in [Nn]*) info "Prep skipped — make sure both servers are prepared."; return 0 ;; esac
+    fi
+    run_prep source "$1" || return 1
+    local srcip
+    srcip=$(prep_source_ip) || { error "Could not determine this server's IP for the destination block."; return 1; }
+    print_destination_block "$srcip" yes
+}
+
+# ════════════════════════════════════════════════════════════
 #   HOME SYNC (rsync)
 # ════════════════════════════════════════════════════════════
 # Copies exactly the selected accounts instead of all of /home behind a growing
@@ -813,6 +1177,10 @@ start_sync() {   # $1 = rows (owner<TAB>user<TAB>domain)
         command -v "$t" >/dev/null 2>&1 || { error "$t not found — install it first (yum/apt install $t)."; return 1; }
     done
     ask_sync_target || return 1
+
+    # Prep before anything moves: SecCheck/scanners off here, the destination
+    # whitelisted here, and the destination block printed + waited for.
+    maybe_prep_source "$SYNC_IP" || return 1
 
     local dir stamp skipped filter slog runner sock session
     dir=$(cd "$OUT_DIR" && pwd) || return 1
@@ -917,6 +1285,37 @@ run_sync() {
     select_accounts
     info "Accounts selected: $(printf '%s\n' "$ROWS" | grep -c .)"
     start_sync "$ROWS" || exit 1
+}
+
+# ════════════════════════════════════════════════════════════
+#   PREP ONLY
+# ════════════════════════════════════════════════════════════
+run_prep_mode() {
+    local side="$PREP_SIDE" ans srcip
+    if [ -z "$side" ]; then
+        echo -e "${CYAN}Which side is THIS server?${RESET}"
+        echo "  1) source       — stop SecCheck & scanners, whitelist the destination"
+        echo "  2) destination  — the same, plus open SSH root login for the rsync"
+        read -r -p "Enter choice (1-2): " ans
+        case "$ans" in
+            1) side="source" ;;
+            2) side="destination" ;;
+            *) error "Invalid choice."; exit 1 ;;
+        esac
+    fi
+    info "Prep mode: $side side"
+    if [ -z "$PEER_IP" ]; then
+        read -r -p "IP of the other server ($([ "$side" = source ] && echo destination || echo source)): " PEER_IP
+    fi
+    [ -n "$PEER_IP" ] || { error "No peer IP given."; exit 1; }
+    [[ "$PEER_IP" =~ ^[0-9A-Fa-f:.]+$ ]] || { error "Invalid peer IP: $PEER_IP"; exit 1; }
+    run_prep "$side" "$PEER_IP" || exit 1
+    # On the source, the destination block belongs with the prep: generate and
+    # print it too (no sync follows here, so no wait for Enter).
+    if [ "$side" = "source" ]; then
+        srcip=$(prep_source_ip) || { error "Could not determine this server's IP for the destination block."; exit 1; }
+        print_destination_block "$srcip" no
+    fi
 }
 
 # ════════════════════════════════════════════════════════════
@@ -1182,6 +1581,7 @@ case "$MODE" in
     source)        run_source ;;
     destination)   run_destination ;;
     sync)          run_sync ;;
+    prep)          run_prep_mode ;;
     *)             error "Unknown mode: $MODE"; exit 1 ;;
 esac
 # finish_log (EXIT trap) prints the log path.
