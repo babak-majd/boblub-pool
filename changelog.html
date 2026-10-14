@@ -310,12 +310,12 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.1</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.2</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.1</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.2</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.3</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
-            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.1</span></button>
+            <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.2.0</span></button>
         </nav>
 
@@ -366,6 +366,40 @@
                     <li><strong>همگام‌سازی هوم</strong> اضافه شد: هوم‌دایرکتوری اکانت‌های انتخاب‌شده با <strong>فقط یک دستور rsync</strong> به مقصد کپی می‌شود. یک فیلتر فقط همان یوزرها را عبور می‌دهد (<code>.cagefs</code> هم کپی می‌شود)، پس دیگر لازم نیست برای کل <code>/home</code> لیست exclude نگه دارید. این گزینه در پایان پاس سورس پیشنهاد می‌شود (با <code>--with-sync</code> / <code>--no-sync</code> از قبل جواب داده می‌شود)، یا به‌تنهایی به‌عنوان حالت ۳ / <code>--sync</code> اجرا می‌شود؛ یوزرها مثل همیشه انتخاب می‌شوند (همه / یوزرهای مشخص / ریسلر) یا از <code>-f migration.csv</code> خوانده می‌شوند.</li>
                     <li>IP و پورت SSH مقصد پرسیده می‌شود (<code>--dest-ip</code>، <code>--dest-port</code>؛ پورت پیش‌فرض ۲۲). اتصال SSH یک بار در ترمینال خودتان باز می‌شود، پس اگر رمز لازم باشد همان‌جا وارد می‌کنید. بعد کپی داخل یک <code>screen</code> جداشده اجرا می‌شود و دستور <code>screen -r …</code> برای اتچ‌شدن به آن چاپ می‌شود.</li>
                     <li>قبل از کپی، با یک تماس SSH بررسی می‌شود کدام یوزرها روی مقصد وجود دارند. یوزرهایی که روی مقصد نیستند یا هومشان مسیر دیگری دارد <strong>کپی نمی‌شوند</strong> تا فایلی با UID خام روی مقصد ننشیند. این یوزرها همراه دلیل در فایل جداگانهٔ <code>magic-move/sync-skipped.csv</code> ثبت می‌شوند. خروجی rsync هم در <code>magic-move/sync-&lt;timestamp&gt;.log</code> ذخیره می‌شود.</li>
+                </ul>
+            </article>
+
+            <!-- ============ 2026-09-30 ============ -->
+            <article class="entry" data-script="wp-core" data-date="2026-09-30">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.6.3</span><time datetime="2026-09-30">2026-09-30</time>
+                </div>
+                <ul class="en">
+                    <li>Prefer the <strong>MariaDB client</strong>: the direct-to-database work (admin management and the version read-backs) now uses <code>mariadb</code> when it is present, falling back to <code>mysql</code> only when it is not. Newer boxes increasingly ship the MariaDB client without the legacy <code>mysql</code> symlink, where the old call failed outright.</li>
+                </ul>
+                <ul class="fa">
+                    <li>ترجیح <strong>کلاینت MariaDB</strong>: کارهای مستقیم روی دیتابیس (مدیریت ادمین و خواندنِ نسخه) حالا اگر <code>mariadb</code> موجود باشد از آن استفاده می‌کنند و فقط در نبودش به <code>mysql</code> برمی‌گردند. سرورهای جدیدتر بیشتر و بیشتر کلاینت MariaDB را بدون symlink قدیمی <code>mysql</code> می‌آورند، جایی که فراخوانی قبلی کلاً شکست می‌خورد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="fix-roundcube" data-date="2026-09-30">
+                <div class="entry-head"><span class="script-tag" data-script="fix-roundcube">fix-roundcube.sh</span><span class="ver">1.2.2</span><time datetime="2026-09-30">2026-09-30</time>
+                </div>
+                <ul class="en">
+                    <li>Prefer the <strong>MariaDB client</strong>: the Roundcube database dump and drop now use <code>mariadb</code> / <code>mariadb-dump</code> when present, falling back to <code>mysql</code> / <code>mysqldump</code>. On a box that ships only the MariaDB client, the backup-then-rebuild no longer fails for want of a <code>mysql</code> binary.</li>
+                </ul>
+                <ul class="fa">
+                    <li>ترجیح <strong>کلاینت MariaDB</strong>: بکاپ و drop دیتابیس Roundcube حالا اگر <code>mariadb</code> / <code>mariadb-dump</code> موجود باشد از آن‌ها استفاده می‌کنند و در نبودش به <code>mysql</code> / <code>mysqldump</code> برمی‌گردند. روی سرورهایی که فقط کلاینت MariaDB دارند، دیگر مرحلهٔ بکاپ-سپس-بازسازی به‌خاطر نبودِ باینری <code>mysql</code> شکست نمی‌خورد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-09-30">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.7.2</span><time datetime="2026-09-30">2026-09-30</time>
+                </div>
+                <ul class="en">
+                    <li>Prefer the <strong>MariaDB client</strong>: the whole-database search &amp; replace now uses <code>mariadb</code> when present, falling back to <code>mysql</code>. On boxes that ship only the MariaDB client, the replace no longer fails for want of a <code>mysql</code> binary.</li>
+                </ul>
+                <ul class="fa">
+                    <li>ترجیح <strong>کلاینت MariaDB</strong>: جست‌وجو و جایگزینیِ کل دیتابیس حالا اگر <code>mariadb</code> موجود باشد از آن استفاده می‌کند و در نبودش به <code>mysql</code> برمی‌گردد. روی سرورهایی که فقط کلاینت MariaDB دارند، دیگر جایگزینی به‌خاطر نبودِ باینری <code>mysql</code> شکست نمی‌خورد.</li>
                 </ul>
             </article>
 
