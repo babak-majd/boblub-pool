@@ -259,10 +259,13 @@ Every domain is probed with **all hostnames pinned to the server being tested**,
    - **Otherwise** it steps the PHP version down the cascade until the site comes back.
 
    It records `status_after` (including which plugins it disabled), snapshots to `snapshots/after/`, and writes a `report.txt`.
+3. **SYNC** — copies the selected accounts' home directories to the destination with **one rsync**. A filter lets only those users through, `.cagefs` included, so there is no `/home`-wide exclude list. It is offered at the end of the source pass (`--with-sync` / `--no-sync` answer it up front), or runs on its own as `--sync`. It asks for the destination IP and SSH port (`--dest-ip`, `--dest-port`). SSH connects once in your terminal, so any password is typed there, and the copy then runs in a detached `screen`; attach with the `screen -r …` command it prints. Users missing on the destination, or homed under a different path there, are **not copied**; they are listed in `magic-move/sync-skipped.csv`.
 
 ```bash
 sudo ./magic-move.sh --source
 sudo ./magic-move.sh --source --list-only --ns                          # just the account list + nameservers
+sudo ./magic-move.sh --source --list-only --with-sync                   # list the accounts, then rsync their homes
+sudo ./magic-move.sh --sync -f magic-move/migration.csv --dest-ip 203.0.113.7 --dest-port 3131   # sync only
 sudo ./magic-move.sh --destination -f migration.csv
 sudo ./magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
 sudo ./magic-move.sh --destination -f migration.csv --no-plugin-heal   # PHP-only healing

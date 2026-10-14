@@ -8,9 +8,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.4.1
+#   Version   : 2.5.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.4.1"
+VERSION="2.5.0"
 
 set -u
 
@@ -90,6 +90,11 @@ DRY_RUN=""                    # destination: check & record, never switch PHP
 PLUGIN_HEAL="yes"             # destination: disable plugins that throw a fatal
                               # (rename <slug> -> <slug>.dis), guided by WP_DEBUG
 PROTECTED_PLUGINS="elementor woocommerce"   # never disabled; matches slug or slug-*
+SYNC=""                       # source: yes = rsync the selected accounts' home
+                              # dirs to the destination after the pass; no =
+                              # don't. Empty means neither flag: ask.
+SYNC_IP=""                    # sync: destination server IP/host — prompted
+SYNC_PORT=""                  # sync: destination SSH port — prompted (default 22)
 
 # ---------- Usage ----------
 usage() {
@@ -110,6 +115,14 @@ A migration is verified in two passes:
                   <slug> to <slug>.dis) — Elementor and WooCommerce are never
                   touched. Otherwise it steps the PHP version down. Records
                   status_after and snapshots to $SNAP_DIR/after/<domain>.html.
+
+  SYNC            Copy the selected accounts' home directories to the
+                  destination with ONE rsync (a filter keeps only those users),
+                  run inside a detached screen. Offered at the end of the
+                  source pass, or on its own with --sync. Users that do not
+                  exist on the destination (or live under another home path
+                  there) are not copied; they are listed in
+                  <outdir>/sync-skipped.csv.
 
 Every domain is probed with all hostnames pinned to this server, so a redirect
 to www/a subdomain follows onto the box we are testing, not wherever DNS points.
@@ -144,6 +157,12 @@ Options:
       --protect <list>    DESTINATION: extra plugin slugs never to disable
                           (space/comma separated; added to the built-in
                           "$PROTECTED_PLUGINS").
+      --sync              Sync only: pick accounts (all / users / reseller, or
+                          -u, -r, -f <csv>) and rsync their homes. No checks.
+      --with-sync         SOURCE: rsync the homes after the pass, without asking.
+      --no-sync           SOURCE: do not offer the rsync.
+      --dest-ip <ip>      Sync target server (asked for when omitted).
+      --dest-port <port>  Sync target SSH port (asked for; default 22).
       --cpanel            Force the cPanel account detector.
       --directadmin       Force the DirectAdmin account detector.
   -h, --help              Show this help and exit.
@@ -153,6 +172,8 @@ Examples:
   magic-move.sh --source -r bob
   magic-move.sh --source --list-only --ns
   magic-move.sh --source --snapshot -u "bobuser, shopuser"
+  magic-move.sh --source --list-only --with-sync --dest-ip 203.0.113.7 --dest-port 3131
+  magic-move.sh --sync -f magic-move/migration.csv
   magic-move.sh --destination -f migration.csv
   magic-move.sh --destination -f https://host/migration.csv --dry-run
   magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
@@ -191,6 +212,15 @@ while [ $# -gt 0 ]; do
         --protect)
             [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
             PROTECTED_PLUGINS="$PROTECTED_PLUGINS ${2//,/ }"; shift 2 ;;
+        --sync)          MODE="sync"; shift ;;
+        --with-sync)     SYNC="yes"; shift ;;
+        --no-sync)       SYNC="no"; shift ;;
+        --dest-ip)
+            [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
+            SYNC_IP="$2"; shift 2 ;;
+        --dest-port)
+            [ -n "${2:-}" ] || { error "$1 requires a value."; exit 1; }
+            SYNC_PORT="$2"; shift 2 ;;
         --cpanel)        PANEL="cpanel"; shift ;;
         --directadmin)   PANEL="directadmin"; shift ;;
         -h|--help)       usage; exit 0 ;;
@@ -222,17 +252,19 @@ print_header
 
 # ---------- Prompt: Mode ----------
 # The whole run hinges on this: the source only records, the destination heals.
-# --list-only / --snapshot / --ns describe the source pass, so any of them
-# settles the mode too — asking again would be asking something already answered.
-[ -z "$MODE" ] && { [ -n "$LIST_ONLY" ] || [ -n "$NS_LOOKUP" ]; } && MODE="source"
+# --list-only / --snapshot / --ns / --with-sync describe the source pass, so any
+# of them settles the mode too — asking again would be asking something already answered.
+[ -z "$MODE" ] && { [ -n "$LIST_ONLY" ] || [ -n "$NS_LOOKUP" ] || [ -n "$SYNC" ]; } && MODE="source"
 if [ -z "$MODE" ]; then
     echo -e "${CYAN}Is this the source or the destination server?${RESET}"
     echo "  1) source       — read this server's accounts (list only, or full snapshot)"
     echo "  2) destination  — re-check and heal broken PHP sites"
-    read -r -p "Enter choice (1 or 2): " MODE_CHOICE
+    echo "  3) sync only    — rsync selected accounts' homes to the destination"
+    read -r -p "Enter choice (1-3): " MODE_CHOICE
     case "$MODE_CHOICE" in
         1) MODE="source" ;;
         2) MODE="destination" ;;
+        3) MODE="sync" ;;
         *) error "Invalid choice."; exit 1 ;;
     esac
 fi
@@ -247,6 +279,10 @@ if [ "$MODE" = "destination" ] && [ "$LIST_ONLY" = "yes" ]; then
 fi
 if [ "$MODE" = "destination" ] && [ "$NS_LOOKUP" = "yes" ]; then
     error "--ns describes the source pass; the destination carries the columns through unchanged."
+    exit 1
+fi
+if [ "$MODE" != "source" ] && { [ "$LIST_ONLY" = "yes" ] || [ "$NS_LOOKUP" = "yes" ] || [ "$SYNC" = "yes" ]; }; then
+    error "--list-only / --ns / --with-sync describe the source pass; they have no meaning with --$MODE."
     exit 1
 fi
 if [ "$MODE" = "source" ] && [ -z "$LIST_ONLY" ]; then
@@ -290,8 +326,8 @@ detect_server_ip() {
 }
 
 # ---------- Prompt: Server IP ----------
-# Nothing is fetched in list-only mode, so the IP is neither needed nor asked for.
-if [ "$LIST_ONLY" != "yes" ]; then
+# Nothing is fetched in list-only or sync mode, so the IP is neither needed nor asked for.
+if [ "$LIST_ONLY" != "yes" ] && [ "$MODE" != "sync" ]; then
     if [ -z "$SERVER_IP" ]; then
         DETECTED_IP=$(detect_server_ip)
         if [ -n "$DETECTED_IP" ]; then
@@ -655,33 +691,30 @@ offer_zip() {
     fi
 }
 
-# ════════════════════════════════════════════════════════════
-#   SOURCE PASS
-# ════════════════════════════════════════════════════════════
-run_source() {
-    local rows
-
-    # Accounts: an explicit "user,domain" list wins; otherwise auto-detect and
-    # let the operator narrow the set (all / specific users / a reseller). Flags
-    # (-u / -r) skip the prompt for non-interactive runs.
+# ---------- Account Selection (source / sync) ----------
+# Sets ROWS (owner<TAB>user<TAB>domain). An explicit "user,domain" list wins;
+# otherwise auto-detect and let the operator narrow the set (all / specific
+# users / a reseller). Flags (-u / -r) skip the prompt for non-interactive runs.
+ROWS=""
+select_accounts() {
     if [ -n "$CSV_IN" ]; then
         [ -f "$CSV_IN" ] || { error "List not found: $CSV_IN"; exit 1; }
-        rows=$(awk -F, 'NF>=2 && $1!~/^#/ && $1!="" && $1!="user" {print "?\t"$1"\t"$2}' "$CSV_IN")
+        ROWS=$(awk -F, 'NF>=2 && $1!~/^#/ && $1!="" && $1!="user" {print "?\t"$1"\t"$2}' "$CSV_IN")
     else
         [ -n "$PANEL" ] || detect_panel || { error "No cPanel/DirectAdmin found. Use --cpanel/--directadmin or -f."; exit 1; }
         info "Detecting accounts via: $PANEL"
-        rows=$("${PANEL}_rows")
-        [ -n "$rows" ] || { error "No accounts detected."; exit 1; }
+        ROWS=$("${PANEL}_rows")
+        [ -n "$ROWS" ] || { error "No accounts detected."; exit 1; }
 
         if [ -n "$USERS" ]; then
-            rows=$(filter_users "$rows" "$USERS")
-            [ -n "$rows" ] || { error "None of the given users matched."; exit 1; }
+            ROWS=$(filter_users "$ROWS" "$USERS")
+            [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; }
         elif [ -n "$RESELLER" ]; then
-            rows=$(filter_reseller "$rows" "$RESELLER")
-            [ -n "$rows" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; }
+            ROWS=$(filter_reseller "$ROWS" "$RESELLER")
+            [ -n "$ROWS" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; }
         else
             local total_all
-            total_all=$(printf '%s\n' "$rows" | grep -c .)
+            total_all=$(printf '%s\n' "$ROWS" | grep -c .)
             echo -e "${CYAN}Which accounts do you want to include?${RESET}"
             echo "  1) all accounts ($total_all)"
             echo "  2) specific users"
@@ -690,11 +723,11 @@ run_source() {
             case "$SEL" in
                 1) : ;;
                 2) read -r -p "Usernames (space/comma separated): " USERS
-                   rows=$(filter_users "$rows" "$USERS")
-                   [ -n "$rows" ] || { error "None of the given users matched."; exit 1; } ;;
+                   ROWS=$(filter_users "$ROWS" "$USERS")
+                   [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; } ;;
                 3) echo -e "${CYAN}Resellers with accounts:${RESET}"
                    local reslist=() rline rnum rc rn ridx
-                   mapfile -t reslist < <(printf '%s\n' "$rows" | cut -f1 | sort | uniq -c | awk '{print $1" "$2}')
+                   mapfile -t reslist < <(printf '%s\n' "$ROWS" | cut -f1 | sort | uniq -c | awk '{print $1" "$2}')
                    ridx=1
                    for rline in "${reslist[@]}"; do
                        rc="${rline%% *}"; rn="${rline#* }"
@@ -706,12 +739,193 @@ run_source() {
                        || { error "Invalid selection."; exit 1; }
                    rline="${reslist[$((rnum-1))]}"; RESELLER="${rline#* }"
                    info "Reseller: $RESELLER"
-                   rows=$(filter_reseller "$rows" "$RESELLER")
-                   [ -n "$rows" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; } ;;
+                   ROWS=$(filter_reseller "$ROWS" "$RESELLER")
+                   [ -n "$ROWS" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; } ;;
                 *) error "Invalid choice."; exit 1 ;;
             esac
         fi
     fi
+}
+
+# ════════════════════════════════════════════════════════════
+#   HOME SYNC (rsync)
+# ════════════════════════════════════════════════════════════
+# Copies exactly the selected accounts instead of all of /home behind a growing
+# exclude list: ONE rsync of the home root, with a filter that lets only those
+# users' directories through (+ /<user>/*** ... - /*), .cagefs and all.
+# Before it starts, one SSH call asks the destination which of the users exist
+# and where their home is. A user missing there — or homed under a different
+# path, which a single rsync cannot map — is left out (copied onto a missing
+# account, the files would land with raw UIDs) and listed in sync-skipped.csv.
+# The SSH master connection is opened here, in the foreground, so a password or
+# host-key prompt is answered once; the copy then runs in a detached screen
+# (it survives a dropped session) and reuses that connection.
+ask_sync_target() {
+    if [ -z "$SYNC_IP" ]; then read -r -p "Destination server IP: " SYNC_IP || true; fi
+    [ -n "$SYNC_IP" ] || { error "No destination IP given."; return 1; }
+    [[ "$SYNC_IP" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { error "Invalid destination IP/host: $SYNC_IP"; return 1; }
+    if [ -z "$SYNC_PORT" ]; then
+        read -r -p "Destination SSH port [22]: " SYNC_PORT || true
+        SYNC_PORT="${SYNC_PORT:-22}"
+    fi
+    [[ "$SYNC_PORT" =~ ^[0-9]+$ ]] && [ "$SYNC_PORT" -ge 1 ] && [ "$SYNC_PORT" -le 65535 ] \
+        || { error "Invalid SSH port: $SYNC_PORT"; return 1; }
+}
+
+# The runner is what screen executes; it is written next to the results so the
+# exact command that ran stays inspectable.
+write_sync_runner() {   # $1 = path
+    cat > "$1" <<'RUNNER'
+#!/bin/bash
+# Generated by magic-move.sh — the home sync, run inside screen.
+root="$1" ip="$2" port="$3" sock="$4" filter="$5" log="$6" skipped="$7" n="$8" nskip="$9"
+exec > >(tee -a "$log") 2>&1
+echo "Magic Move — home sync   $(date +'%F %T')"
+echo "  $n account(s): $root/  ->  root@$ip:$root/  (ssh port $port)"
+echo
+start=$SECONDS
+rsync -avzPHh --stats \
+      --rsh="ssh -p $port -o ControlPath=$sock -o ServerAliveInterval=30" \
+      --filter="merge $filter" \
+      "$root/" "root@$ip:$root/"
+rc=$?
+ssh -p "$port" -o ControlPath="$sock" -O exit "root@$ip" >/dev/null 2>&1
+s=$((SECONDS-start))
+echo
+echo "════════════════════════════════════════════════"
+case $rc in
+    0)  echo "  Result   : OK" ;;
+    24) echo "  Result   : OK (some files vanished mid-copy — normal on live sites)" ;;
+    *)  echo "  Result   : FAILED (rsync exit $rc)" ;;
+esac
+echo "  Accounts : $n"
+[ "$nskip" -gt 0 ] && echo "  Skipped  : $nskip (not copied) — see $skipped"
+printf '  Duration : %dh %02dm %02ds\n' $((s/3600)) $(((s%3600)/60)) $((s%60))
+echo "  Log      : $log"
+echo "════════════════════════════════════════════════"
+read -r -p "Press Enter to close this screen... " _
+RUNNER
+}
+
+start_sync() {   # $1 = rows (owner<TAB>user<TAB>domain)
+    local t
+    for t in rsync ssh screen getent; do
+        command -v "$t" >/dev/null 2>&1 || { error "$t not found — install it first (yum/apt install $t)."; return 1; }
+    done
+    ask_sync_target || return 1
+
+    local dir stamp skipped filter slog runner sock session
+    dir=$(cd "$OUT_DIR" && pwd) || return 1
+    stamp=$(date +%F_%H-%M-%S)
+    skipped="$dir/sync-skipped.csv"; filter="$dir/sync-filter.txt"
+    slog="$dir/sync-$stamp.log";     runner="$dir/sync-run.sh"
+    sock="/tmp/magic-move-ssh-$$"
+    session="magic-move-sync-$(date +%H%M%S)"
+    local rsh="ssh -p $SYNC_PORT -o ControlPath=$sock -o ServerAliveInterval=30"
+
+    # Local side: each user needs a real home, and one rsync means one root —
+    # the root most users live under wins (normally /home).
+    local -A seen=() lhome=() rhome=()
+    local cand=() keep=() user home root n_skip=0
+    echo "user,reason" > "$skipped"
+    while IFS=$'\t' read -r _ user _; do
+        [ -n "$user" ] || continue
+        [ -n "${seen[$user]:-}" ] && continue; seen[$user]=1
+        if [[ ! "$user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "$user,invalid username" >> "$skipped"; n_skip=$((n_skip+1)); continue
+        fi
+        home=$(getent passwd "$user" | cut -d: -f6)
+        if [ -z "$home" ] || [ ! -d "$home" ] || [ "${home##*/}" != "$user" ]; then
+            echo "$user,no local home${home:+ ($home)}" >> "$skipped"; n_skip=$((n_skip+1)); continue
+        fi
+        lhome[$user]="$home"; cand+=("$user")
+    done <<< "$1"
+    [ "${#cand[@]}" -gt 0 ] || { error "No account has a usable home directory — see $skipped"; return 1; }
+    root=$(for user in "${cand[@]}"; do dirname "${lhome[$user]}"; done | sort | uniq -c | sort -rn | awk 'NR==1{print $2}')
+
+    # One master connection; its fds are detached so it never holds the log tee open.
+    info "Connecting to root@$SYNC_IP:$SYNC_PORT (enter the password if asked)..."
+    ssh -p "$SYNC_PORT" -o ControlMaster=yes -o ControlPath="$sock" -o ControlPersist=yes \
+        -o ServerAliveInterval=30 -fN "root@$SYNC_IP" </dev/null >/dev/null 2>&1 \
+        || { error "Cannot connect to root@$SYNC_IP:$SYNC_PORT."; return 1; }
+    local close_master="ssh -p $SYNC_PORT -o ControlPath=$sock -O exit root@$SYNC_IP"
+
+    # Destination side: one call reports every user's home there (empty = missing).
+    local out u h
+    out=$(printf '%s\n' "${cand[@]}" | $rsh "root@$SYNC_IP" \
+        'while read -r u; do printf "%s\t%s\n" "$u" "$(getent passwd "$u" | cut -d: -f6)"; done') \
+        || { error "Could not query accounts on the destination."; $close_master >/dev/null 2>&1; return 1; }
+    while IFS=$'\t' read -r u h; do [ -n "$u" ] && rhome[$u]="$h"; done <<< "$out"
+
+    : > "$filter"
+    for user in "${cand[@]}"; do
+        h="${rhome[$user]:-}"
+        if [ "$(dirname "${lhome[$user]}")" != "$root" ]; then
+            echo "$user,home under $(dirname "${lhome[$user]}") not $root (sync it separately)" >> "$skipped"
+        elif [ -z "$h" ]; then
+            echo "$user,missing on destination" >> "$skipped"
+        elif [ "$h" != "${lhome[$user]}" ]; then
+            echo "$user,different home on destination ($h)" >> "$skipped"
+        else
+            keep+=("$user"); echo "+ /$user/***" >> "$filter"; continue
+        fi
+        n_skip=$((n_skip+1))
+    done
+    echo "- /*" >> "$filter"
+
+    [ "$n_skip" -gt 0 ] && error "$n_skip account(s) will NOT be synced — see $skipped"
+    if [ "${#keep[@]}" -eq 0 ]; then
+        error "Nothing to sync."; $close_master >/dev/null 2>&1; return 1
+    fi
+
+    write_sync_runner "$runner"
+    screen -dmS "$session" bash "$runner" "$root" "$SYNC_IP" "$SYNC_PORT" "$sock" \
+        "$filter" "$slog" "$skipped" "${#keep[@]}" "$n_skip" </dev/null >/dev/null 2>&1
+    sleep 1
+    if ! screen -ls 2>/dev/null | grep -q "[0-9]\.$session[[:space:]]"; then
+        error "Could not start the screen session."; $close_master >/dev/null 2>&1; return 1
+    fi
+
+    success "Sync started: ${#keep[@]} account(s) -> root@$SYNC_IP:$root/ (port $SYNC_PORT)"
+    echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
+    echo -e "  Attach   : ${YELLOW}screen -r $session${RESET}"
+    echo -e "  Detach   : Ctrl+A then D"
+    echo -e "  Sync log : $slog"
+    [ "$n_skip" -gt 0 ] && echo -e "  ${YELLOW}Skipped${RESET}  : $n_skip — $skipped"
+    echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
+    log "SYNC started: ${#keep[@]} accounts -> root@$SYNC_IP:$SYNC_PORT $root/, skipped=$n_skip, screen=$session, log=$slog"
+}
+
+# Source pass hook: --with-sync / --no-sync answer up front, otherwise ask.
+maybe_sync() {   # $1 = rows
+    [ "$SYNC" = "no" ] && return 0
+    if [ -z "$SYNC" ]; then
+        [ -t 0 ] || return 0
+        local n ans
+        n=$(printf '%s\n' "$1" | grep -c .)
+        echo
+        read -r -p "rsync these $n account(s)' home directories to the destination now? [y/N]: " ans
+        case "$ans" in [Yy]*) ;; *) return 0 ;; esac
+    fi
+    start_sync "$1"
+}
+
+# ════════════════════════════════════════════════════════════
+#   SYNC ONLY
+# ════════════════════════════════════════════════════════════
+run_sync() {
+    select_accounts
+    info "Accounts selected: $(printf '%s\n' "$ROWS" | grep -c .)"
+    start_sync "$ROWS" || exit 1
+}
+
+# ════════════════════════════════════════════════════════════
+#   SOURCE PASS
+# ════════════════════════════════════════════════════════════
+run_source() {
+    local rows
+    select_accounts
+    rows="$ROWS"
 
     local total i=0 ok=0 fail=0 start=$SECONDS
     total=$(printf '%s\n' "$rows" | grep -c .)
@@ -790,6 +1004,7 @@ run_source() {
         echo -e "${CYAN}════════════════════════════════════════════════${RESET}"
         echo -e "  Health-check these accounts later with:  magic-move.sh --source --snapshot"
         log "SOURCE list-only done: $i accounts, ${dur} -> $OUT_CSV"
+        maybe_sync "$rows"
         return 0
     fi
 
@@ -803,6 +1018,7 @@ run_source() {
     echo -e "  Copy the ${YELLOW}$OUT_DIR/${RESET} folder to the destination, then:  magic-move.sh --destination"
     log "SOURCE done: $i accounts, OK=$ok Fail=$fail, ${dur} -> $OUT_CSV"
 
+    maybe_sync "$rows"
     offer_zip
 }
 
@@ -965,6 +1181,7 @@ run_destination() {
 case "$MODE" in
     source)        run_source ;;
     destination)   run_destination ;;
+    sync)          run_sync ;;
     *)             error "Unknown mode: $MODE"; exit 1 ;;
 esac
 # finish_log (EXIT trap) prints the log path.

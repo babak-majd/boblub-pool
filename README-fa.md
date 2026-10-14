@@ -259,10 +259,13 @@ sudo ./perm-patrol.sh --user exampleuser --modes --harden --dry-run
    - **در غیر این صورت** نسخهٔ PHP را پله‌پله پایین می‌آورد تا سایت برگردد.
 
    `status_after` (شامل اینکه کدام افزونه‌ها غیرفعال شدند) را ثبت می‌کند، در `snapshots/after/` اسنپ‌شات می‌گیرد و یک `report.txt` می‌نویسد.
+3. **SYNC** — هوم‌دایرکتوری اکانت‌های انتخاب‌شده را با **فقط یک rsync** به مقصد کپی می‌کند. یک فیلتر فقط همان یوزرها را عبور می‌دهد (`.cagefs` هم کپی می‌شود)، پس دیگر لازم نیست برای کل `/home` لیست exclude نگه دارید. در پایان پاس سورس پیشنهاد می‌شود (با `--with-sync` / `--no-sync` از قبل جواب داده می‌شود)، یا به‌تنهایی با `--sync` اجرا می‌شود. IP و پورت SSH مقصد را می‌پرسد (`--dest-ip`، `--dest-port`). اتصال SSH یک بار در ترمینال خودتان باز می‌شود، پس اگر رمز لازم باشد همان‌جا وارد می‌کنید؛ بعد کپی داخل یک `screen` جداشده اجرا می‌شود و با دستور `screen -r …` که چاپ می‌شود به آن وصل می‌شوید. یوزرهایی که روی مقصد نیستند یا هومشان آنجا مسیر دیگری دارد **کپی نمی‌شوند** و در `magic-move/sync-skipped.csv` ثبت می‌شوند.
 
 ```bash
 sudo ./magic-move.sh --source
 sudo ./magic-move.sh --source --list-only --ns                          # فقط لیست اکانت‌ها + نیم‌سرورها
+sudo ./magic-move.sh --source --list-only --with-sync                   # لیست اکانت‌ها، بعد rsync هوم‌هایشان
+sudo ./magic-move.sh --sync -f magic-move/migration.csv --dest-ip 203.0.113.7 --dest-port 3131   # فقط سینک
 sudo ./magic-move.sh --destination -f migration.csv
 sudo ./magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
 sudo ./magic-move.sh --destination -f migration.csv --no-plugin-heal   # فقط ترمیم PHP

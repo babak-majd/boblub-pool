@@ -313,13 +313,29 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.1</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.1</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.2</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.4.1</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.5.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.1</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.1.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-10-14 ============ -->
+            <article class="entry" data-script="magic-move" data-date="2026-10-14">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.5.0</span><time datetime="2026-10-14">2026-10-14</time>
+                </div>
+                <ul class="en">
+                    <li>New <strong>home sync</strong>: copies the selected accounts&#39; home directories to the destination with <strong>a single rsync</strong>. A filter lets only those users through, <code>.cagefs</code> included, so there is no exclude list for all of <code>/home</code> to maintain. Offered at the end of the source pass (<code>--with-sync</code> / <code>--no-sync</code> answer it up front), or on its own as mode 3 / <code>--sync</code>, with the usual all / users / reseller pick or <code>-f migration.csv</code>.</li>
+                    <li>Asks for the destination IP and SSH port (<code>--dest-ip</code>, <code>--dest-port</code>; default port 22). The SSH connection is opened once, in your terminal, so any password is typed there. The copy then runs in a detached <code>screen</code>, and the script prints the <code>screen -r …</code> command to attach to it.</li>
+                    <li>Before copying, one SSH call checks which users exist on the destination. Users that are missing there, or whose home is under a different path, are <strong>not copied</strong>, so no files land with raw UIDs. They are listed with the reason in a separate <code>magic-move/sync-skipped.csv</code>. The rsync output goes to <code>magic-move/sync-&lt;timestamp&gt;.log</code>.</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>همگام‌سازی هوم</strong> اضافه شد: هوم‌دایرکتوری اکانت‌های انتخاب‌شده با <strong>فقط یک دستور rsync</strong> به مقصد کپی می‌شود. یک فیلتر فقط همان یوزرها را عبور می‌دهد (<code>.cagefs</code> هم کپی می‌شود)، پس دیگر لازم نیست برای کل <code>/home</code> لیست exclude نگه دارید. این گزینه در پایان پاس سورس پیشنهاد می‌شود (با <code>--with-sync</code> / <code>--no-sync</code> از قبل جواب داده می‌شود)، یا به‌تنهایی به‌عنوان حالت ۳ / <code>--sync</code> اجرا می‌شود؛ یوزرها مثل همیشه انتخاب می‌شوند (همه / یوزرهای مشخص / ریسلر) یا از <code>-f migration.csv</code> خوانده می‌شوند.</li>
+                    <li>IP و پورت SSH مقصد پرسیده می‌شود (<code>--dest-ip</code>، <code>--dest-port</code>؛ پورت پیش‌فرض ۲۲). اتصال SSH یک بار در ترمینال خودتان باز می‌شود، پس اگر رمز لازم باشد همان‌جا وارد می‌کنید. بعد کپی داخل یک <code>screen</code> جداشده اجرا می‌شود و دستور <code>screen -r …</code> برای اتچ‌شدن به آن چاپ می‌شود.</li>
+                    <li>قبل از کپی، با یک تماس SSH بررسی می‌شود کدام یوزرها روی مقصد وجود دارند. یوزرهایی که روی مقصد نیستند یا هومشان مسیر دیگری دارد <strong>کپی نمی‌شوند</strong> تا فایلی با UID خام روی مقصد ننشیند. این یوزرها همراه دلیل در فایل جداگانهٔ <code>magic-move/sync-skipped.csv</code> ثبت می‌شوند. خروجی rsync هم در <code>magic-move/sync-&lt;timestamp&gt;.log</code> ذخیره می‌شود.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-09-25 ============ -->
             <article class="entry" data-script="plugin-hunter" data-date="2026-09-25">
