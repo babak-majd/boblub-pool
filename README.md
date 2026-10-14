@@ -261,11 +261,16 @@ Every domain is probed with **all hostnames pinned to the server being tested**,
    It records `status_after` (including which plugins it disabled), snapshots to `snapshots/after/`, and writes a `report.txt`.
 3. **SYNC** — copies the selected accounts' home directories to the destination with **one rsync**. A filter lets only those users through, `.cagefs` included, so there is no `/home`-wide exclude list. It is offered at the end of the source pass (`--with-sync` / `--no-sync` answer it up front), or runs on its own as `--sync`. It asks for the destination IP and SSH port (`--dest-ip`, `--dest-port`). SSH connects once in your terminal, so any password is typed there, and the copy then runs in a detached `screen`; attach with the `screen -r …` command it prints. Users missing on the destination, or homed under a different path there, are **not copied**; they are listed in `magic-move/sync-skipped.csv`.
 
+> 🔧 **PREP — readying both servers (before the first byte moves).** A migration usually dies on things the transfer can't see: SecCheck re-enabling itself, a scanner locking files, the firewall dropping the rsync. So `magic-move.sh` can prepare a server first — it stops & disables **SecCheck** (quarantining the cron entries that resurrect it, moving `/etc/SecCheck` aside), stops & disables the **scanner services** (`clamd@scan`, `clamav-freshclam`, `cxswatch`, `rspamd`, `spamd`), comments an active `ALL: ALL` out of `hosts.deny`, and whitelists the peer's IP in **CSF**. The **destination** additionally gets **SSH root login** opened — validated with `sshd -t` before any restart, with the backup restored if the test fails. Every step is idempotent and keeps a backup. Inside a sync flow the source runs its prep, then prints a complete, **ready-to-paste block for the destination** (the source IP already in it) and waits for Enter before the rsync; `--skip-prep` skips it on already-prepared servers. Run it standalone with `--prep` (`--source`/`--destination` + `--peer-ip`), or pick menu option 4.
+
 ```bash
 sudo ./magic-move.sh --source
 sudo ./magic-move.sh --source --list-only --ns                          # just the account list + nameservers
 sudo ./magic-move.sh --source --list-only --with-sync                   # list the accounts, then rsync their homes
 sudo ./magic-move.sh --sync -f magic-move/migration.csv --dest-ip 203.0.113.7 --dest-port 3131   # sync only
+sudo ./magic-move.sh --sync --skip-prep -f magic-move/migration.csv     # sync; both servers already prepared
+sudo ./magic-move.sh --prep --source --peer-ip 203.0.113.7              # prep this source + print the destination block
+sudo ./magic-move.sh --prep --destination --peer-ip 198.51.100.3        # prep this destination (opens root SSH)
 sudo ./magic-move.sh --destination -f migration.csv
 sudo ./magic-move.sh --destination -f migration.csv --protect "wp-rocket, litespeed-cache"
 sudo ./magic-move.sh --destination -f migration.csv --no-plugin-heal   # PHP-only healing
@@ -273,6 +278,8 @@ sudo ./magic-move.sh --destination -f migration.csv --dry-run          # check &
 ```
 
 > ⚠️ On the destination, healing **modifies live sites** — it disables plugins and (on CloudLinux) switches PHP versions. Use `--dry-run` first to see what it *would* do. The migration CSV/report/snapshots are the result and stay in the output folder; the run log goes to `/var/log/magic-move/`.
+>
+> ⚠️ PREP deliberately **relaxes the server's security for the migration** — it turns off SecCheck and the scanners and opens root SSH on the destination. Run it only between servers you control, and re-enable those protections once the move is done (backups of every edited file are kept next to the originals).
 
 ---
 
@@ -302,24 +309,35 @@ sudo ./fix-roundcube.sh
 
 **Turns anything into a download link.** You have a file on the server and someone needs it — a client, a colleague, another server. Instead of SFTP credentials, you give them a URL.
 
-Run it, and it asks for **one** thing: a file path, a directory, or a URL.
+Give it one thing (a file path, a directory, or a URL), then pick **how** to publish. Only the backends the box actually has are offered; if it has none, it says so and stops:
 
-| You give it… | It does… |
+| Method | What it does |
 | --- | --- |
-| A **file path** | Copies it into `/var/www/html` and prints the public URL. |
-| A **directory** | Asks whether you want `tar.gz` or `zip`, compresses it, publishes the archive, prints the URL. |
-| A **URL** | Downloads it with `wget` straight into the web root and re-publishes it from your server. Handy for pulling a file across servers when one can't reach the other. |
+| **web root** | Classic copy into `/var/www/html`, served by the running web server. **Stays until you remove it.** Offered when a web server (or `/var/www/html`) is present. |
+| **php link** | A throwaway `php -S` on a **random free port**, serving **just that one file** behind a **random token path** — not the folder, not anything else. Offered when php-cli exists. |
+| **python link** | The same, with a small python server. Offered when `python3` exists. |
+
+A directory is compressed first (`tar.gz` / `zip`); a URL is downloaded, then served from your server.
+
+**The temporary link (php/python) is ephemeral and self-contained:**
+
+- **One file only.** The link is `http://<ip>:<port>/<token>/<file>`; every other path — including `/` — returns `404`. No directory listing, nothing else on disk to reach. `Range` is supported, so an interrupted download can resume.
+- **The firewall port is opened for the run and closed again afterwards** — `firewalld` / `ufw` / `iptables` is auto-detected, the rule is uniquely tagged, and on teardown **exactly that rule is removed and then verified**, so no hole is ever left open.
+- **It lives only while the run does.** Press `Ctrl+C`, drop the SSH session (`SIGHUP`), or hit the `--timeout` you set (asked for; **max 12h**) and it tears everything down: server stopped, firewall closed, temp files removed. On timeout it blocks new connections first and lets an in-progress download finish. A background backstop closes the port even if the script is `kill -9`'d.
 
 ```bash
 sudo ./thing-to-link.sh
 # or answer every prompt up-front with flags:
-sudo ./thing-to-link.sh -i https://example.com/file.zip
-sudo ./thing-to-link.sh -i /home/user/backups -c zip -w /var/www/html
+sudo ./thing-to-link.sh -i /root/backup.tar.gz --serve php -t 2h
+sudo ./thing-to-link.sh -i https://example.com/file.zip --serve python
+sudo ./thing-to-link.sh -i /home/user/backups -c zip --webroot /var/www/html   # classic web-root copy
 ```
 
 Any flag you leave out is simply asked for interactively. Run `./thing-to-link.sh --help` for the full list.
 
-> ⚠️ Whatever you publish is **public to anyone with the link**. Delete it from `/var/www/html` when you're done — especially backups and database dumps.
+> ⚠️ Whatever you publish is **reachable by anyone with the link** while it is up. A temporary link limits the exposure — random port, unguessable token, and it dies with your session or the timeout. The **web-root** copy, by contrast, stays public until you delete it from `/var/www/html`, so clean up backups and database dumps when you're done.
+>
+> ℹ️ Run a temporary link **inside `tmux`/`screen`** and it survives an SSH disconnect (it is no longer your session that ends) — the `--timeout` still closes it.
 
 ---
 

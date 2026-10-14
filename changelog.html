@@ -313,15 +313,47 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.7.1</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.10.1</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.2</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.5.0</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.1</span></button>
-            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.1.0</span></button>
+            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.2.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
 
             <!-- ============ 2026-10-14 ============ -->
+            <article class="entry" data-script="thing-to-link" data-date="2026-10-14">
+                <div class="entry-head"><span class="script-tag" data-script="thing-to-link">thing-to-link.sh</span><span class="ver">1.2.0</span><time datetime="2026-10-14">2026-10-14</time>
+                </div>
+                <ul class="en">
+                    <li>Reworked around a <strong>temporary, self-expiring link</strong> instead of only dropping files in the web root. It now offers a throwaway server — <code>php -S</code> or a <strong>python</strong> server on a <strong>random free port</strong> — that serves <strong>exactly one file</strong> behind a <strong>random token path</strong> (<code>/&lt;token&gt;/&lt;file&gt;</code>); every other path, <code>/</code> included, is <code>404</code>. Range requests are honoured, so an interrupted download can resume.</li>
+                    <li>Only the backends this box actually has are offered: the classic <strong>web-root copy</strong> when a web server (or <code>/var/www/html</code>) is present, a <strong>php link</strong> when php-cli exists, a <strong>python link</strong> when python3 exists. If none exist it says so and stops. The old web-root behaviour is still there as <code>--webroot</code>.</li>
+                    <li>The chosen port is opened in the firewall for the life of the run (<code>firewalld</code> / <code>ufw</code> / <code>iptables</code> auto-detected) with a uniquely-tagged rule, and <strong>closed again — exactly the rule it opened, then verified</strong> — on teardown, so no firewall hole is ever left behind.</li>
+                    <li>The link lives <strong>only while the process does</strong>: it tears down on <kbd>Ctrl+C</kbd>, when the SSH session ends (<code>SIGHUP</code>), or at the <code>--timeout</code> you set (asked for; <strong>max 12h</strong>). On timeout it blocks new connections first and lets an in-progress download drain. A background backstop still closes the port even if the script is killed outright (<code>kill -9</code>).</li>
+                </ul>
+                <ul class="fa">
+                    <li>به‌جای اینکه فقط فایل را توی وب‌روت بریزد، حالا حول یک <strong>لینک موقت و خودمنقضی</strong> بازطراحی شده. یک سرور یک‌بارمصرف بالا می‌آورد — <code>php -S</code> یا سرور <strong>پایتون</strong> روی یک <strong>پورت آزاد تصادفی</strong> — که <strong>دقیقاً یک فایل</strong> را پشت یک <strong>مسیر توکن تصادفی</strong> (<code>/&lt;token&gt;/&lt;file&gt;</code>) سرو می‌کند؛ هر مسیر دیگری، از جمله <code>/</code>، می‌شود <code>404</code>. درخواست Range پشتیبانی می‌شود، پس دانلودِ نیمه‌کاره قابل ادامه است.</li>
+                    <li>فقط بک‌اندهایی که واقعاً روی سرور هست پیشنهاد می‌شود: <strong>کپی در وب‌روت</strong> وقتی وب‌سرور (یا <code>/var/www/html</code>) باشد، <strong>لینک php</strong> وقتی php-cli باشد، <strong>لینک python</strong> وقتی python3 باشد. اگر هیچ‌کدام نبود، اعلام می‌کند و متوقف می‌شود. رفتار قدیمی وب‌روت هم با <code>--webroot</code> در دسترس است.</li>
+                    <li>پورت انتخاب‌شده تا پایان اجرا در فایروال باز می‌شود (تشخیص خودکار <code>firewalld</code> / <code>ufw</code> / <code>iptables</code>) با یک rule دارای برچسب یکتا، و هنگام پایان <strong>دقیقاً همان rule که باز کرده بسته و سپس بازبینی می‌شود</strong> تا هیچ پورت بازی باقی نماند.</li>
+                    <li>لینک <strong>فقط تا وقتی پراسس زنده است</strong> دوام دارد: با <kbd>Ctrl+C</kbd>، با بسته‌شدن سشن SSH (<code>SIGHUP</code>)، یا با <code>--timeout</code> که تعیین می‌کنید (پرسیده می‌شود؛ <strong>سقف ۱۲ ساعت</strong>) جمع می‌شود. موقع timeout اول جلوی اتصال‌های جدید گرفته می‌شود و به دانلودِ درجریان فرصت اتمام داده می‌شود. یک backstop پس‌زمینه حتی اگر اسکریپت با <code>kill -9</code> کشته شود پورت را می‌بندد.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="magic-move" data-date="2026-10-14">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.6.0</span><time datetime="2026-10-14">2026-10-14</time>
+                </div>
+                <ul class="en">
+                    <li>New migration <strong>PREP</strong> step that readies both servers before the first rsync: SecCheck is stopped &amp; disabled (the cron entries that resurrect it are quarantined and <code>/etc/SecCheck</code> is moved aside), the scanner services (<code>clamd@scan</code>, <code>clamav-freshclam</code>, <code>cxswatch</code>, <code>rspamd</code>, <code>spamd</code>) are stopped &amp; disabled, an active <code>ALL: ALL</code> is commented out of <code>hosts.deny</code>, and the peer&#39;s IP is whitelisted in CSF. The destination additionally opens SSH root login — validated with <code>sshd -t</code> before any restart, with the backup restored if the test fails. Every step is idempotent and keeps a backup.</li>
+                    <li>Inside a sync flow the source runs its own prep, then prints a complete, <strong>ready-to-paste block for the destination</strong> (the source IP already filled in) and waits for Enter before the rsync. <code>--skip-prep</code> skips it on servers that are already prepared.</li>
+                    <li>New <code>--prep</code> mode runs the prep on its own (the side comes from <code>--source</code>/<code>--destination</code>, or is asked) with <code>--peer-ip</code>; also available as menu option 4.</li>
+                </ul>
+                <ul class="fa">
+                    <li>مرحلهٔ <strong>PREP</strong> اضافه شد که قبل از اولین rsync هر دو سرور را آماده می‌کند: SecCheck متوقف و غیرفعال می‌شود (کرون‌هایی که دوباره زنده‌اش می‌کنند قرنطینه و <code>/etc/SecCheck</code> کنار گذاشته می‌شود)، سرویس‌های اسکنر (<code>clamd@scan</code>، <code>clamav-freshclam</code>، <code>cxswatch</code>، <code>rspamd</code>، <code>spamd</code>) متوقف و غیرفعال می‌شوند، <code>ALL: ALL</code> فعال در <code>hosts.deny</code> کامنت می‌شود، و IP سرور مقابل در CSF whitelist می‌شود. مقصد علاوه بر این لاگین root روی SSH را باز می‌کند — که پیش از هر ری‌استارت با <code>sshd -t</code> اعتبارسنجی می‌شود و در صورت شکست، بکاپ برگردانده می‌شود. هر مرحله idempotent است و بکاپ نگه می‌دارد.</li>
+                    <li>داخل جریان sync، سورس prep خودش را اجرا می‌کند و بعد یک <strong>بلوک آمادهٔ paste برای مقصد</strong> (با IP سورس ازپیش‌پرشده) چاپ می‌کند و پیش از rsync منتظر Enter می‌ماند. <code>--skip-prep</code> روی سرورهای ازپیش‌آماده این مرحله را رد می‌کند.</li>
+                    <li>حالت جدید <code>--prep</code> این آماده‌سازی را به‌تنهایی اجرا می‌کند (سمت سرور از <code>--source</code>/<code>--destination</code> گرفته یا پرسیده می‌شود) با <code>--peer-ip</code>؛ به‌عنوان گزینهٔ ۴ منو هم در دسترس است.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="magic-move" data-date="2026-10-14">
                 <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.5.0</span><time datetime="2026-10-14">2026-10-14</time>
                 </div>
