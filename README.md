@@ -72,7 +72,7 @@ Every script prints its version in its terminal header. Full per-script release 
 | --- | --- | --- |
 | **1** | Repair existing version | Detects your installed version (e.g. 6.9.4), downloads that *same* version fresh from wordpress.org, and overwrites the core files. **Fixes hacked/corrupted/deleted core files without changing your version.** |
 | **2** | Update to latest version | Same thing, but with the newest WordPress release. |
-| **3** | Install WordPress 6.9.4 | Forces this specific version — useful for downgrading after a bad update. |
+| **3** | Install the security patch for this version | Detects the installed version, looks up the **latest secure release of its own branch** (e.g. `6.8.3` → `6.8.11`) from WordPress's live version API, and **suggests** it — you confirm before it installs. Stays on your branch; never jumps a major/minor. If the API can't be reached it says so and falls back to reinstalling the current version (it never crashes on a failed API call). |
 | **4** | Install custom version | You type the version (e.g. `6.8.3`) and it installs exactly that. |
 | **5** | Rollback to previous core | Restores the core that was replaced last time, from `old-core/`. Your undo button. |
 | **6** | Manage administrator users | Opens the admin submenu below. |

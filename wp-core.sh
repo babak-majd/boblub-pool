@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.8.0
+#   Version   : 1.9.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.8.0"
+VERSION="1.9.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -1340,7 +1340,7 @@ fi
 
 echo -e "${YELLOW}1) Repair existing version${NC}"
 echo -e "${YELLOW}2) Update to latest version${NC}"
-echo -e "${YELLOW}3) Install WordPress 6.9.5${NC}"
+echo -e "${YELLOW}3) Install the security patch for this version${WP_VERSION:+ (${WP_VERSION})}${NC}"
 echo -e "${YELLOW}4) Install custom version${NC}"
 echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo -e "${YELLOW}6) Manage administrator users${NC}"
@@ -1352,7 +1352,7 @@ read -p "$(echo -e ${GREEN}"Enter choice [1-7]: "${NC})" choice
 case $choice in
     1) action="repair" ;;
     2) action="update" ;;
-    3) action="v695" ;;
+    3) action="secpatch" ;;
     4) action="custom" ;;
     5) action="rollback" ;;
     6) manage_admins; exit $? ;;
@@ -1489,8 +1489,47 @@ elif [[ "$action" == "cascade" ]]; then
 elif [[ "$action" == "update" ]]; then
     PKG_VERSION="latest"
 
-elif [[ "$action" == "v695" ]]; then
-    PKG_VERSION="6.9.5"
+elif [[ "$action" == "secpatch" ]]; then
+    # Detect the installed version and SUGGEST its branch's latest secure patch
+    # (e.g. 6.8.3 -> 6.8.11), confirming before anything is installed. Every API
+    # call degrades gracefully: if the version list can't be fetched, we never
+    # crash — we fall back to reinstalling the current version.
+    [[ -n "$WP_VERSION" ]] || { echo -e "${RED}✘ Could not detect the installed version.${NC}"; exit 1; }
+    branch=$(printf '%s' "$WP_VERSION" | grep -oE '^[0-9]+\.[0-9]+')
+    echo -e "${BLUE}Installed version:${NC} ${WP_VERSION}${branch:+ ${BLUE}(branch ${branch})${NC}}"
+    echo -e "${BLUE}Looking up the latest secure ${branch} release...${NC}"
+    OFFERS=$(fetch_safe_offers)          # empty on any network/API failure
+    SUGGEST=""
+    [[ -n "$OFFERS" && -n "$branch" ]] && \
+        SUGGEST=$(printf '%s\n' "$OFFERS" | awk -v b="$branch" '$1==b || index($1, b".")==1 {print $1; exit}')
+
+    if [[ -z "$OFFERS" ]]; then
+        echo -e "${YELLOW}⚠ Could not reach the WordPress version API — can't check for the secure patch.${NC}"
+        echo -e "${YELLOW}  Falling back to reinstalling the current version (${WP_VERSION}).${NC}"
+        if [[ "$ASSUME_YES" != "yes" ]]; then
+            read -p "$(echo -e ${CYAN}"Reinstall ${WP_VERSION}? [Y/n]: "${NC})" _c
+            [[ -z "$_c" || "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+        fi
+        PKG_VERSION="$WP_VERSION"
+    elif [[ -z "$SUGGEST" ]]; then
+        echo -e "${YELLOW}⚠ The ${branch} branch no longer has a secure release (end-of-life).${NC}"
+        echo -e "${YELLOW}  Use option 7 (cascading update) to move to a supported branch.${NC}"
+        exit 0
+    elif [[ "$SUGGEST" == "$WP_VERSION" ]] || ver_ge "$WP_VERSION" "$SUGGEST"; then
+        echo -e "${GREEN}✔ Already on the latest secure ${branch} release (${WP_VERSION}).${NC}"
+        if [[ "$ASSUME_YES" != "yes" ]]; then
+            read -p "$(echo -e ${CYAN}'Reinstall it to repair core files? [y/N]: '${NC})" _c
+            [[ "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Nothing to do.${NC}"; exit 0; }
+        fi
+        PKG_VERSION="$WP_VERSION"
+    else
+        echo -e "${GREEN}✔ Suggested security patch:${NC} ${SUGGEST} ${BLUE}(for your ${WP_VERSION})${NC}"
+        if [[ "$ASSUME_YES" != "yes" ]]; then
+            read -p "$(echo -e ${CYAN}"Install ${SUGGEST}? [Y/n]: "${NC})" _c
+            [[ -z "$_c" || "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
+        fi
+        PKG_VERSION="$SUGGEST"
+    fi
 
 elif [[ "$action" == "custom" ]]; then
     if [[ -n "$CUSTOM_VERSION" ]]; then
