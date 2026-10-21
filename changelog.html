@@ -311,7 +311,7 @@
 
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.12.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.13.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.3</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
@@ -322,6 +322,19 @@
         <div class="entries" id="entries">
 
             <!-- ============ 2026-10-21 ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-10-21">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.13.0</span><time datetime="2026-10-21">2026-10-21</time>
+                </div>
+                <ul class="en">
+                    <li>Automate mode can now check the <strong>admin dashboard</strong>, for problems that only show up in wp-admin. It <strong>logs in by itself, without changing any password</strong>. wp-cli runs with plugins and themes skipped, so the broken plugin can&#39;t stop it, and opens a temporary WordPress session for an administrator (the first one, or <code>--admin-user</code>). It builds the real login cookies, keeps them in a <code>0600</code> file (never on a command line or in the log), and deletes the session when the script ends, including on cancel and Ctrl+C. An admin page also fails when the login is bounced to <code>wp-login.php</code> or the admin screen doesn&#39;t render.</li>
+                    <li>Instead of checking several pages every time, it now asks for <strong>one</strong> target: front page, admin dashboard, or a custom page (a <code>/wp-admin/...</code> page is checked logged in). <code>--check front|admin|&lt;path&gt;</code> answers it up front. This replaces 1.12.0&#39;s always-on wp-login check together with its <code>--no-login</code> / <code>--no-extra</code> flags; <code>--page</code> still works for a custom page.</li>
+                </ul>
+                <ul class="fa">
+                    <li>حالت automate حالا می‌تواند <strong>پیشخوان</strong> را هم بررسی کند، برای مشکل‌هایی که فقط در wp-admin پیدا می‌شوند. برای این کار <strong>خودش لاگین می‌کند، بدون اینکه رمزی عوض شود</strong>. wp-cli با افزونه‌ها و قالبِ خاموش اجرا می‌شود تا افزونهٔ خراب نتواند جلویش را بگیرد، و برای یک مدیر (اولین مدیر، یا <code>--admin-user</code>) یک سشن موقت وردپرس باز می‌کند. کوکی‌های واقعی لاگین را می‌سازد و در یک فایل <code>0600</code> نگه می‌دارد (هیچ‌وقت در خط فرمان یا لاگ نمی‌آید)، و وقتی اسکریپت تمام شود سشن را پاک می‌کند، حتی با کنسل و Ctrl+C. صفحهٔ پیشخوان همچنین وقتی خراب حساب می‌شود که لاگین به <code>wp-login.php</code> برگردانده شود یا صفحهٔ مدیریت رندر نشود.</li>
+                    <li>به‌جای اینکه هر بار چند صفحه را بررسی کند، حالا <strong>یک</strong> هدف را می‌پرسد: صفحه اصلی، پیشخوان، یا یک صفحهٔ دلخواه (صفحهٔ <code>/wp-admin/...</code> با لاگین بررسی می‌شود). <code>--check front|admin|&lt;path&gt;</code> از قبل جوابش را می‌دهد. این جای بررسی همیشگی wp-login در نسخهٔ 1.12.0 و پرچم‌های <code>--no-login</code> / <code>--no-extra</code> آن را می‌گیرد؛ <code>--page</code> برای صفحهٔ دلخواه همچنان کار می‌کند.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="plugin-hunter" data-date="2026-10-21">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.12.0</span><time datetime="2026-10-21">2026-10-21</time>
                 </div>

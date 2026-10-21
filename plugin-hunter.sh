@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.12.0
+#   Version   : 1.13.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.12.0"
+VERSION="1.13.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -83,10 +83,18 @@ Options:
                           pass in automate mode).
       --no-fast           Skip the fast path (see below) and go straight to the
                           full linear/binary hunt.
-      --page <path|url>   Automate mode: also check this page (repeatable), e.g.
-                          --page /shop --page /cart. Asked for when omitted.
-      --no-extra          Don't ask for extra pages to check.
-      --no-login          Don't check wp-login.php (checked by default).
+      --check <target>    Automate mode: what the health check looks at — ONE of
+                            front           the front page
+                            admin           the admin dashboard, logged in by
+                                            the script itself (no password is
+                                            changed)
+                            <path|url>      a custom page, e.g. /shop; a
+                                            /wp-admin/... page is checked
+                                            logged in too
+                          Asked for when omitted.
+      --page <path|url>   Same as --check <path|url>.
+      --admin-user <login>  Admin account to log in as (default: the first
+                          administrator).
       --slow <sec>        A page slower than this counts as broken (default 10).
       --timeout <sec>     A page that takes longer than this has timed out
                           (default 30).
@@ -102,12 +110,19 @@ plugin, and re-checks — looping for further culprits. If that fixes the site t
 long search is skipped; if not, anything it touched is undone and the normal hunt
 runs exactly as before.
 
-Automate mode checks the front page, wp-login.php and any extra pages, and
-counts a page as broken on: a timeout, a slow load (re-tested once first, so a
-cold cache isn't blamed), a connection failure or redirect loop, a non-200 status
-(5xx only for wp-login), an empty or cut-off page, or an error in the body —
-critical error, PHP fatal / parse error, memory exhausted, max execution time,
-database error, or a stuck maintenance mode. The reason is shown for each fail.
+Automate mode checks the ONE page you choose and counts it as broken on: a
+timeout, a slow load (re-tested once first, so a cold cache isn't blamed), a
+connection failure or redirect loop, a non-200 status, an empty or cut-off page,
+or an error in the body — critical error, PHP fatal / parse error, memory
+exhausted, max execution time, database error, or a stuck maintenance mode. The
+reason is shown for each fail.
+
+For an admin page the script logs in by itself: wp-cli (run with plugins and
+themes skipped, so a broken plugin can't stop it) opens a temporary WordPress
+session for an administrator and builds its login cookies. No password is
+changed, the cookie never appears on a command line, and the session is deleted
+when the script ends. An admin page also fails when the login is bounced back
+to wp-login.php or the admin screen doesn't render.
 
 If the hunt CANNOT fix the site (no plugin culprit, or the fault is not a plugin
 at all), it offers to turn WordPress debugging on: WP_DEBUG, WP_DEBUG_LOG and
@@ -119,7 +134,8 @@ Examples:
   plugin-hunter.sh -d bob.ir --automate --binary
   plugin-hunter.sh -p /home/u/public_html --manual --linear
   plugin-hunter.sh -d bob.ir --automate --no-fast
-  plugin-hunter.sh -d bob.ir -a -b --page /shop --page /my-account --slow 8
+  plugin-hunter.sh -d bob.ir -a -b --check admin
+  plugin-hunter.sh -d bob.ir -a -b --check /shop --slow 8
 EOF
 }
 
@@ -133,9 +149,8 @@ STRATEGY=""
 AUTO_ACCEPT=""
 FAST="yes"                 # try the debug-log fast path before the full hunt
 DEBUG_OFFER=""             # unresolved hunt: ""=ask, yes=turn WP_DEBUG on, no=never
-EXTRA_PAGES=()             # automate: extra pages to check (--page, or asked)
-ASK_EXTRA="yes"            # ask for extra pages when --page was not given
-CHECK_LOGIN="yes"          # automate: also check wp-login.php
+CHECK_TARGET=""            # automate: front | admin | <path|url> (--check, or asked)
+ADMIN_USER=""              # --admin-user: admin to log in as (default: first admin)
 SLOW_LIMIT=10              # seconds: slower than this = broken
 PAGE_TIMEOUT=30            # seconds: curl --max-time per page
 
@@ -153,11 +168,12 @@ while [ $# -gt 0 ]; do
         -b|--binary)    STRATEGY="binary"; shift ;;
         --auto-accept)  AUTO_ACCEPT="yes"; shift ;;
         --no-fast)      FAST=""; shift ;;
-        --page)
+        --check|--page)
             [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
-            EXTRA_PAGES+=("$2"); shift 2 ;;
-        --no-extra)     ASK_EXTRA=""; shift ;;
-        --no-login)     CHECK_LOGIN=""; shift ;;
+            CHECK_TARGET="$2"; shift 2 ;;
+        --admin-user)
+            [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
+            ADMIN_USER="$2"; shift 2 ;;
         --slow|--timeout)
             [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -gt 0 ] || { error "$1 needs a whole number of seconds."; exit 1; }
             if [ "$1" = "--slow" ]; then SLOW_LIMIT="$2"; else PAGE_TIMEOUT="$2"; fi
@@ -371,6 +387,96 @@ cancel_hint(){
     fi
 }
 
+# ---------- Admin auto-login (automate mode, admin pages) ----------
+# To check wp-admin without anyone typing a password, the script opens a real
+# WordPress session for an administrator — no password is read or changed:
+#   * wp-cli runs with --skip-plugins --skip-themes, so the very plugin that is
+#     breaking the site can't stop it;
+#   * WP_Session_Tokens creates a session and wp_generate_auth_cookie() builds
+#     the auth / secure_auth / logged_in cookies exactly as wp-login.php would;
+#   * the cookies go into a 0600 curl config file (curl -K) and never appear on a
+#     command line or in the log;
+#   * on exit — normal end, cancel, Ctrl+C — the session is destroyed and the
+#     file removed (it would also expire on its own after 6h).
+WP_CLI=()
+ADMIN_UID=""; ADMIN_TOKEN=""; ADMIN_CURLCFG=""
+
+# Find a working wp-cli (system, cPanel, DirectAdmin phar, or a portable copy).
+find_wp_cli() {
+    [ "${#WP_CLI[@]}" -gt 0 ] && return 0
+    local c phar php
+    local -a opts=(--allow-root "--path=$WP_DIR" --skip-plugins --skip-themes)
+    for c in "$(command -v wp 2>/dev/null)" /usr/local/bin/wp /tmp/wp; do
+        [ -n "$c" ] && [ -x "$c" ] || continue
+        "$c" "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=("$c" "${opts[@]}"); return 0; }
+    done
+    for phar in /usr/local/directadmin/custombuild/cache/wp-cli-*.phar; do
+        [ -f "$phar" ] || continue
+        for php in /usr/local/php*/bin/php "$(command -v php 2>/dev/null)"; do
+            [ -n "$php" ] && [ -x "$php" ] || continue
+            "$php" "$phar" "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=("$php" "$phar" "${opts[@]}"); return 0; }
+        done
+    done
+    info "Downloading portable wp-cli to /tmp..."
+    if wget -q -O /tmp/wp.zip "http://dl.iswps.ir/cli/wp.zip" \
+       && unzip -j -o /tmp/wp.zip 'wp' -d /tmp >/dev/null 2>&1; then
+        chmod +x /tmp/wp
+        /tmp/wp "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=(/tmp/wp "${opts[@]}"); rm -f /tmp/wp.zip; return 0; }
+    fi
+    rm -f /tmp/wp.zip
+    return 1
+}
+
+admin_login() {
+    local out login
+    find_wp_cli || { error "The admin check needs wp-cli, and none was found or could be downloaded."; return 1; }
+    out=$(PH_USER="$ADMIN_USER" "${WP_CLI[@]}" eval '
+        $l = getenv("PH_USER");
+        if ($l) {
+            $u = get_user_by("login", $l);
+            if (!$u) { echo "PHERR no user with login: $l\n"; return; }
+        } else {
+            $a = get_users(array("role" => "administrator", "number" => 1, "orderby" => "ID"));
+            $u = $a ? $a[0] : null;
+            if (!$u) { echo "PHERR no administrator account found\n"; return; }
+        }
+        $exp = time() + 6 * HOUR_IN_SECONDS;
+        $tok = WP_Session_Tokens::get_instance($u->ID)->create($exp);
+        echo "PHUSER {$u->ID} {$u->user_login}\n";
+        echo "PHTOK $tok\n";
+        foreach (array(array(AUTH_COOKIE, "auth"), array(SECURE_AUTH_COOKIE, "secure_auth"), array(LOGGED_IN_COOKIE, "logged_in")) as $c) {
+            echo "PHCOOKIE " . $c[0] . "=" . rawurlencode(wp_generate_auth_cookie($u->ID, $exp, $c[1], $tok)) . "\n";
+        }
+    ' 2>&1)
+
+    ADMIN_UID=$(awk '$1=="PHUSER"{print $2; exit}' <<<"$out")
+    login=$(awk '$1=="PHUSER"{print $3; exit}' <<<"$out")
+    ADMIN_TOKEN=$(awk '$1=="PHTOK"{print $2; exit}' <<<"$out")
+    if [ -z "$ADMIN_UID" ] || [ -z "$ADMIN_TOKEN" ]; then
+        error "Could not open an admin session: $(sed -n 's/^PHERR //p' <<<"$out" | head -n1)"
+        grep -q '^PHERR' <<<"$out" || tail -n 3 <<<"$out"
+        return 1
+    fi
+    ADMIN_CURLCFG=$(mktemp /tmp/plugin-hunter-ck.XXXXXX) || return 1
+    chmod 600 "$ADMIN_CURLCFG"
+    printf 'header = "Cookie: %s"\n' "$(sed -n 's/^PHCOOKIE //p' <<<"$out" | paste -sd ';' | sed 's/;/; /g')" > "$ADMIN_CURLCFG"
+    success "Logged in as admin '$login' with a temporary session (no password changed; removed when the script ends)."
+}
+
+admin_logout() {
+    [ -n "$ADMIN_CURLCFG" ] && rm -f "$ADMIN_CURLCFG"
+    ADMIN_CURLCFG=""
+    [ -n "$ADMIN_TOKEN" ] || return 0
+    PH_UID="$ADMIN_UID" PH_TOK="$ADMIN_TOKEN" "${WP_CLI[@]}" eval \
+        'WP_Session_Tokens::get_instance((int) getenv("PH_UID"))->destroy(getenv("PH_TOK"));' >/dev/null 2>&1 \
+        && info "Temporary admin session removed." \
+        || error "Could not remove the temporary admin session (it expires on its own within 6h)."
+    ADMIN_TOKEN=""
+}
+
+# The session must never outlive the run: log out first, then close the log.
+trap 'admin_logout; finish_log' EXIT
+
 # ---------- Domain (automate mode only) ----------
 # Automate mode needs a domain for the HTTP health check. Reuse the one entered
 # during webroot resolution if we have it; only prompt when it is still unknown
@@ -382,23 +488,36 @@ if [[ "$MODE" == "automate" ]]; then
     fi
     CHECK_URL="https://$DOMAIN/"
 
-    # Extra pages: --page flags, else ask once (Enter skips; --no-extra never asks).
-    if [ "${#EXTRA_PAGES[@]}" -eq 0 ] && [ -n "$ASK_EXTRA" ]; then
-        read -r -p "Extra page(s) to check too, space-separated, e.g. /shop /cart (Enter to skip): " EXTRA_IN
-        read -r -a EXTRA_PAGES <<< "$EXTRA_IN"
+    # What to check — ONE target: --check / --page, else ask.
+    if [ -z "$CHECK_TARGET" ]; then
+        echo -e "${CYAN}What should the automatic check look at?${RESET}"
+        echo "1) front page"
+        echo "2) admin dashboard  (logs in by itself — no password is changed)"
+        echo "3) a custom page    (path or URL; a /wp-admin/... page is checked logged in)"
+        read -r -p "Enter choice (1-3) [1]: " TARGET_CHOICE
+        case "${TARGET_CHOICE:-1}" in
+            1) CHECK_TARGET="front" ;;
+            2) CHECK_TARGET="admin" ;;
+            3) read -r -p "Page path or URL (e.g. /shop or /wp-admin/edit.php): " CHECK_TARGET
+               [ -n "$CHECK_TARGET" ] || { error "No page given."; exit 1; } ;;
+            *) error "Invalid choice."; exit 1 ;;
+        esac
     fi
 
-    # Every page the health check probes: "kind|url" (kind: front | login | page).
-    CHECK_PAGES=("front|$CHECK_URL")
-    [ -n "$CHECK_LOGIN" ] && CHECK_PAGES+=("login|https://$DOMAIN/wp-login.php")
-    for pg in "${EXTRA_PAGES[@]}"; do
-        if [[ "$pg" =~ ^https?:// ]]; then CHECK_PAGES+=("page|$pg")
-        else CHECK_PAGES+=("page|https://$DOMAIN/${pg#/}"); fi
-    done
+    # Resolve it to "kind|url" (kind: front | admin | page).
+    case "$CHECK_TARGET" in
+        front)       CHECK_PAGE="front|$CHECK_URL" ;;
+        admin)       CHECK_PAGE="admin|https://$DOMAIN/wp-admin/" ;;
+        http://*|https://*) CHECK_PAGE="page|$CHECK_TARGET" ;;
+        *)           CHECK_PAGE="page|https://$DOMAIN/${CHECK_TARGET#/}" ;;
+    esac
+    [[ "$CHECK_PAGE" == page\|*/wp-admin/* || "$CHECK_PAGE" == page\|*/wp-admin ]] && CHECK_PAGE="admin|${CHECK_PAGE#*|}"
     (( SLOW_LIMIT >= PAGE_TIMEOUT )) && PAGE_TIMEOUT=$((SLOW_LIMIT + 5))
 
-    info "Health-check pages (slow > ${SLOW_LIMIT}s, timeout ${PAGE_TIMEOUT}s):"
-    for pg in "${CHECK_PAGES[@]}"; do info "  - ${pg#*|}"; done
+    info "Health-check page: ${CHECK_PAGE#*|}  (slow > ${SLOW_LIMIT}s, timeout ${PAGE_TIMEOUT}s)"
+    if [[ "$CHECK_PAGE" == admin\|* ]]; then
+        admin_login || exit 1
+    fi
 fi
 
 # ---------- Site Health Check ----------
@@ -416,8 +535,8 @@ fi
 # Beyond a hard error, a plugin can also break a site by making it crawl or hang,
 # so a slow load and a timeout count as broken too. A slow/timed-out page is
 # re-tested once before it is blamed, so a cold cache or a one-off hiccup isn't
-# mistaken for a culprit. Every page in CHECK_PAGES (front, wp-login.php, extras)
-# must pass; the first failure is reported with its reason.
+# mistaken for a culprit. The ONE page in CHECK_PAGE is probed; an admin page is
+# fetched with the auto-login session and must actually render the admin screen.
 
 # Body signatures of a broken WordPress page: "regex|reason".
 BROKEN_SIGNS=(
@@ -430,11 +549,19 @@ BROKEN_SIGNS=(
     'Briefly unavailable for scheduled maintenance|stuck in maintenance mode'
 )
 
+# curl one page as the health check sees it (admin pages carry the session).
+fetch_page() {   # $1 kind (front|admin|page), $2 url, then extra curl args
+    local kind="$1" url="$2"; shift 2
+    local -a ck=()
+    [[ "$kind" == "admin" && -n "$ADMIN_CURLCFG" ]] && ck=(-K "$ADMIN_CURLCFG")
+    curl -s -k -L --max-redirs 10 --connect-timeout 10 --max-time "$PAGE_TIMEOUT" \
+        "${ck[@]}" "$@" "$url" 2>/dev/null
+}
+
 # One request to one page -> prints "OK" or "FAIL: <reason>".
-probe_page() {   # $1 kind (front|login|page), $2 url
-    local kind="$1" url="$2" resp rc meta code t body sign
-    resp=$(curl -s -k -L --max-redirs 10 -w '\n%{http_code} %{time_total}' \
-        --connect-timeout 10 --max-time "$PAGE_TIMEOUT" "$url" 2>/dev/null)
+probe_page() {   # $1 kind (front|admin|page), $2 url
+    local kind="$1" url="$2" resp rc meta code t eff body sign
+    resp=$(fetch_page "$kind" "$url" -w '\n%{http_code} %{time_total} %{url_effective}')
     rc=$?
     case "$rc" in
         0)  ;;
@@ -447,22 +574,21 @@ probe_page() {   # $1 kind (front|login|page), $2 url
     esac
     meta="${resp##*$'\n'}"
     body="${resp%$'\n'*}"
-    code="${meta%% *}"; t="${meta##* }"
+    read -r code t eff <<<"$meta"
 
-    # wp-login.php is often hidden or blocked on purpose (403/404 from a
-    # hide-login plugin or a firewall) — only a server error counts there.
-    if [[ "$kind" == "login" ]]; then
-        [[ "$code" =~ ^5 ]] && { echo "FAIL: HTTP $code"; return; }
-    elif [[ "$code" != "200" ]]; then
-        echo "FAIL: HTTP $code"; return
+    # Admin page: bounced to the login form means the session was rejected.
+    if [[ "$kind" == "admin" && "$eff" == *wp-login.php* ]]; then
+        echo "FAIL: admin login rejected (redirected to wp-login.php)"; return
     fi
+    [[ "$code" == "200" ]] || { echo "FAIL: HTTP $code"; return; }
 
     for sign in "${BROKEN_SIGNS[@]}"; do
         grep -qiE "${sign%|*}" <<<"$body" && { echo "FAIL: ${sign##*|}"; return; }
     done
-    if [[ "$code" == "200" ]]; then
-        [[ -n "${body//[[:space:]]/}" ]] || { echo "FAIL: empty page (white screen)"; return; }
-        grep -qi '</html>' <<<"$body" || { echo "FAIL: page cut off mid-render (no </html>)"; return; }
+    [[ -n "${body//[[:space:]]/}" ]] || { echo "FAIL: empty page (white screen)"; return; }
+    grep -qi '</html>' <<<"$body" || { echo "FAIL: page cut off mid-render (no </html>)"; return; }
+    if [[ "$kind" == "admin" ]] && ! grep -q 'id="wpwrap"' <<<"$body"; then
+        echo "FAIL: admin screen did not render"; return
     fi
     if awk -v t="$t" -v l="$SLOW_LIMIT" 'BEGIN{exit !(t > l)}'; then
         printf 'FAIL: slow (%.1fs > %ss)\n' "$t" "$SLOW_LIMIT"; return
@@ -471,20 +597,13 @@ probe_page() {   # $1 kind (front|login|page), $2 url
 }
 
 check_site() {
-    local pg kind url r
-    for pg in "${CHECK_PAGES[@]}"; do
-        kind="${pg%%|*}"; url="${pg#*|}"
+    local kind="${CHECK_PAGE%%|*}" url="${CHECK_PAGE#*|}" r
+    r=$(probe_page "$kind" "$url")
+    # Slow / timeout: re-test once before blaming anything.
+    if [[ "$r" == "FAIL: slow"* || "$r" == "FAIL: timeout"* ]]; then
         r=$(probe_page "$kind" "$url")
-        # Slow / timeout: re-test once before blaming anything.
-        if [[ "$r" == "FAIL: slow"* || "$r" == "FAIL: timeout"* ]]; then
-            r=$(probe_page "$kind" "$url")
-        fi
-        if [[ "$r" != "OK" ]]; then
-            echo "$r — $url"
-            return
-        fi
-    done
-    echo "OK"
+    fi
+    if [[ "$r" == "OK" ]]; then echo "OK"; else echo "$r — $url"; fi
 }
 
 # ---------- Resolved Check (sets RESOLVED to yes/no) ----------
@@ -929,14 +1048,12 @@ fastpath_hunt() {
         n=$((n+1))
         slug=""
         # 1) the live response bodies (display_errors shows the path directly)
-        #    — every health-check page, so a fatal only on wp-login or a custom
-        #    page is caught too
+        #    — the front page and the checked page, so a fatal that only shows
+        #    in wp-admin or on a custom page is caught too
         if [ -n "$url" ]; then
-            local pg
-            body=""
-            for pg in "${CHECK_PAGES[@]:-front|$url}"; do
-                body+=$(curl -s -k -L --connect-timeout 10 --max-time "$PAGE_TIMEOUT" "${pg#*|}" 2>/dev/null)$'\n'
-            done
+            body=$(fetch_page front "$url")
+            [ -n "${CHECK_PAGE:-}" ] && [ "${CHECK_PAGE#*|}" != "$url" ] \
+                && body+=$'\n'$(fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}")
             slug=$(extract_plugin_slug "$body")
         fi
         # 2) an existing debug.log
@@ -945,7 +1062,8 @@ fastpath_hunt() {
         if [ -z "$slug" ] && [ -n "$cfg" ] && [ -n "$url" ]; then
             [ -n "$PH_EDITED_CFG" ] || enable_debug_log "$cfg" || break
             : > "$DEBUG_LOG" 2>/dev/null || true
-            curl -s -L --connect-timeout 10 --max-time 25 "$url" >/dev/null 2>&1
+            fetch_page front "$url" >/dev/null
+            [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null
             sleep 1
             [ -f "$DEBUG_LOG" ] && slug=$(extract_plugin_slug "$(tail -n 300 "$DEBUG_LOG" 2>/dev/null)")
         fi
@@ -1040,7 +1158,8 @@ offer_wp_debug() {
     local url="${CHECK_URL:-}"
     [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
     if [ -n "$url" ]; then
-        curl -s -L --connect-timeout 10 --max-time 25 "$url" >/dev/null 2>&1
+        fetch_page front "$url" >/dev/null
+        [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null
         sleep 1
     fi
     if [ -s "$DEBUG_LOG" ]; then
