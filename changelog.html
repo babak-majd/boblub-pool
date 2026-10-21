@@ -311,7 +311,7 @@
 
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.11.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.12.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.3</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
@@ -322,6 +322,19 @@
         <div class="entries" id="entries">
 
             <!-- ============ 2026-10-21 ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-10-21">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.12.0</span><time datetime="2026-10-21">2026-10-21</time>
+                </div>
+                <ul class="en">
+                    <li>Automate mode now understands many more ways a site can be broken. A <strong>slow load</strong> (<code>--slow</code>, default 10s) and a <strong>timeout</strong> (<code>--timeout</code>, default 30s) count as broken, each re-tested once first so a cold cache isn&#39;t blamed. So do a connection failure, a redirect loop, an empty (white) or cut-off page, and new error signatures in the body: memory exhausted, max execution time exceeded, uncaught exceptions, a database-connection error, and a stuck maintenance mode. Every fail now prints its reason and the page.</li>
+                    <li><strong>More pages checked automatically</strong>: besides the homepage, <code>wp-login.php</code> (only a 5xx or an error counts there — a 403/404 is usually a hide-login plugin) and any pages you name, via <code>--page /shop --page /cart</code> or a one-time question. <code>--no-login</code> and <code>--no-extra</code> turn those off. The fast path reads fatals from every checked page, and from memory / execution-time errors too.</li>
+                </ul>
+                <ul class="fa">
+                    <li>حالت automate حالا انواع خیلی بیشتری از خرابی سایت را می‌فهمد. <strong>کند لود شدن</strong> (<code>--slow</code>، پیش‌فرض ۱۰ ثانیه) و <strong>تایم‌اوت</strong> (<code>--timeout</code>، پیش‌فرض ۳۰ ثانیه) خرابی حساب می‌شوند — هر دو قبل از نتیجه‌گیری یک بار دیگر تست می‌شوند تا کش سرد مقصر نشود. همین‌طور قطع اتصال، redirect loop، صفحهٔ خالی (سفید) یا نیمه‌کاره، و خطاهای جدید در متن صفحه: پر شدن حافظه، گذشتن از max execution time، exceptionهای uncaught، خطای اتصال به دیتابیس و گیر کردن در حالت maintenance. دلیل هر خرابی و صفحه‌اش حالا چاپ می‌شود.</li>
+                    <li><strong>صفحه‌های بیشتری خودکار چک می‌شوند</strong>: علاوه بر صفحهٔ اصلی، <code>wp-login.php</code> (آن‌جا فقط 5xx یا خطا حساب می‌شود — 403/404 معمولاً کار افزونهٔ مخفی‌سازی لاگین است) و هر صفحهٔ دلخواهی که با <code>--page /shop --page /cart</code> یا با یک سؤال یک‌باره بدهید. <code>--no-login</code> و <code>--no-extra</code> این‌ها را خاموش می‌کنند. مسیر سریع هم fatalها را از همهٔ صفحه‌های بررسی‌شده می‌خواند و خطاهای حافظه / زمان اجرا را هم می‌شناسد.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="pro-plugin-manager" data-date="2026-10-21">
                 <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.8.0</span><time datetime="2026-10-21">2026-10-21</time>
                 </div>

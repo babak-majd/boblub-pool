@@ -198,11 +198,13 @@ It disables plugins by renaming their folders (`plugin-name` → `plugin-name.of
 | # | Mode | Meaning |
 | --- | --- | --- |
 | **1** | manual | The script pauses after each change and asks *you* whether the site is working. **Use this** when the bug is something only a human can see — broken checkout, wrong layout, a page that half-loads. |
-| **2** | automate | The script loads the homepage itself and checks for a healthy, fully-rendered response. Faster, hands-off. Use this when the site is fully down (500 / white screen), because that's a failure a script can actually detect. |
+| **2** | automate | The script loads the pages itself — the homepage, `wp-login.php` and any extra pages you name — and checks each for a healthy, fully-rendered, fast response. Faster, hands-off. Use this when the failure is something a script can detect: 500 / white screen, a PHP error on the page, or a site that has become very slow or hangs. |
 
 **Second — how should it hunt?**
 
 Both strategies start the same way: **every plugin is disabled first**, and the site is checked to confirm it's now healthy. If it's still broken with nothing enabled, the fault isn't a plugin and the scan stops — *unless* WooCommerce is installed, in which case it's switched back on and the check repeated first (many themes fatal without it); WooCommerce then stays on and is excluded from the hunt. They then re-enable plugins to find what breaks the site — so problems that only show up when several plugins are active together are caught too. Either strategy reports **every** guilty plugin, not just the first. In **manual** mode you confirm each culprit as it's found. In **automate** mode the hunt runs unattended, then does a re-verification pass — each identified culprit is switched back on and the site re-tested, and anything that no longer breaks it is treated as a false positive and left enabled — before confirming all the survivors with a single question. Pass `--auto-accept` to keep every find without prompting.
+
+**What automate mode counts as broken.** Every checked page must pass. A page fails on a **timeout** (`--timeout`, default 30s) or a **slow load** (`--slow`, default 10s), each re-tested once first so a cold cache isn't blamed. It also fails on a connection failure or redirect loop, a non-200 status, an empty (white) or cut-off page, or an error in the body: critical error, PHP fatal/parse error, memory exhausted, max execution time exceeded, database error, or stuck maintenance mode. The reason is printed with every fail. `wp-login.php` only fails on a 5xx or one of those errors — a 403/404 there is usually a hide-login plugin or a firewall, not a fault. Extra pages come from `--page /shop --page /cart` or are asked for once (`--no-extra` skips the question, `--no-login` skips wp-login).
 
 | # | Strategy | Meaning |
 | --- | --- | --- |

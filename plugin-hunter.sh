@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.11.0
+#   Version   : 1.12.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.11.0"
+VERSION="1.12.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -83,6 +83,13 @@ Options:
                           pass in automate mode).
       --no-fast           Skip the fast path (see below) and go straight to the
                           full linear/binary hunt.
+      --page <path|url>   Automate mode: also check this page (repeatable), e.g.
+                          --page /shop --page /cart. Asked for when omitted.
+      --no-extra          Don't ask for extra pages to check.
+      --no-login          Don't check wp-login.php (checked by default).
+      --slow <sec>        A page slower than this counts as broken (default 10).
+      --timeout <sec>     A page that takes longer than this has timed out
+                          (default 30).
       --debug             If the hunt cannot fix the site, turn WP_DEBUG on
                           without asking (see below).
       --no-debug          Never offer to turn WP_DEBUG on.
@@ -95,6 +102,13 @@ plugin, and re-checks — looping for further culprits. If that fixes the site t
 long search is skipped; if not, anything it touched is undone and the normal hunt
 runs exactly as before.
 
+Automate mode checks the front page, wp-login.php and any extra pages, and
+counts a page as broken on: a timeout, a slow load (re-tested once first, so a
+cold cache isn't blamed), a connection failure or redirect loop, a non-200 status
+(5xx only for wp-login), an empty or cut-off page, or an error in the body —
+critical error, PHP fatal / parse error, memory exhausted, max execution time,
+database error, or a stuck maintenance mode. The reason is shown for each fail.
+
 If the hunt CANNOT fix the site (no plugin culprit, or the fault is not a plugin
 at all), it offers to turn WordPress debugging on: WP_DEBUG, WP_DEBUG_LOG and
 WP_DEBUG_DISPLAY are each checked and switched on in wp-config.php (a timestamped
@@ -105,6 +119,7 @@ Examples:
   plugin-hunter.sh -d bob.ir --automate --binary
   plugin-hunter.sh -p /home/u/public_html --manual --linear
   plugin-hunter.sh -d bob.ir --automate --no-fast
+  plugin-hunter.sh -d bob.ir -a -b --page /shop --page /my-account --slow 8
 EOF
 }
 
@@ -118,6 +133,11 @@ STRATEGY=""
 AUTO_ACCEPT=""
 FAST="yes"                 # try the debug-log fast path before the full hunt
 DEBUG_OFFER=""             # unresolved hunt: ""=ask, yes=turn WP_DEBUG on, no=never
+EXTRA_PAGES=()             # automate: extra pages to check (--page, or asked)
+ASK_EXTRA="yes"            # ask for extra pages when --page was not given
+CHECK_LOGIN="yes"          # automate: also check wp-login.php
+SLOW_LIMIT=10              # seconds: slower than this = broken
+PAGE_TIMEOUT=30            # seconds: curl --max-time per page
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -133,6 +153,15 @@ while [ $# -gt 0 ]; do
         -b|--binary)    STRATEGY="binary"; shift ;;
         --auto-accept)  AUTO_ACCEPT="yes"; shift ;;
         --no-fast)      FAST=""; shift ;;
+        --page)
+            [ -n "$2" ] || { error "$1 requires a value."; exit 1; }
+            EXTRA_PAGES+=("$2"); shift 2 ;;
+        --no-extra)     ASK_EXTRA=""; shift ;;
+        --no-login)     CHECK_LOGIN=""; shift ;;
+        --slow|--timeout)
+            [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -gt 0 ] || { error "$1 needs a whole number of seconds."; exit 1; }
+            if [ "$1" = "--slow" ]; then SLOW_LIMIT="$2"; else PAGE_TIMEOUT="$2"; fi
+            shift 2 ;;
         --debug)        DEBUG_OFFER="yes"; shift ;;
         --no-debug)     DEBUG_OFFER="no"; shift ;;
         -h|--help)      usage; exit 0 ;;
@@ -352,7 +381,24 @@ if [[ "$MODE" == "automate" ]]; then
         read -r -p "Enter domain (without https://): " DOMAIN
     fi
     CHECK_URL="https://$DOMAIN/"
-    info "Health-check URL: $CHECK_URL"
+
+    # Extra pages: --page flags, else ask once (Enter skips; --no-extra never asks).
+    if [ "${#EXTRA_PAGES[@]}" -eq 0 ] && [ -n "$ASK_EXTRA" ]; then
+        read -r -p "Extra page(s) to check too, space-separated, e.g. /shop /cart (Enter to skip): " EXTRA_IN
+        read -r -a EXTRA_PAGES <<< "$EXTRA_IN"
+    fi
+
+    # Every page the health check probes: "kind|url" (kind: front | login | page).
+    CHECK_PAGES=("front|$CHECK_URL")
+    [ -n "$CHECK_LOGIN" ] && CHECK_PAGES+=("login|https://$DOMAIN/wp-login.php")
+    for pg in "${EXTRA_PAGES[@]}"; do
+        if [[ "$pg" =~ ^https?:// ]]; then CHECK_PAGES+=("page|$pg")
+        else CHECK_PAGES+=("page|https://$DOMAIN/${pg#/}"); fi
+    done
+    (( SLOW_LIMIT >= PAGE_TIMEOUT )) && PAGE_TIMEOUT=$((SLOW_LIMIT + 5))
+
+    info "Health-check pages (slow > ${SLOW_LIMIT}s, timeout ${PAGE_TIMEOUT}s):"
+    for pg in "${CHECK_PAGES[@]}"; do info "  - ${pg#*|}"; done
 fi
 
 # ---------- Site Health Check ----------
@@ -363,26 +409,82 @@ fi
 # WordPress's critical-error notice. Checking only the code would mark such a
 # "200-but-broken" homepage OK — exactly the failure this guards against.
 #
-# We probe the real front page, NOT /wp-json/: the REST endpoint keeps
-# returning 200 even while the public site is broken, which would make automate
-# mode declare the first disabled plugin "the fix" on every run.
-check_site() {
-    local resp code body
-    # Fetch body + status in one request; -w appends the code on its own line.
-    resp=$(curl -s -L -w '\n%{http_code}' \
-        --connect-timeout 10 --max-time 25 "$CHECK_URL")
-    code="${resp##*$'\n'}"
-    body="${resp%$'\n'*}"
+# We probe real pages, NOT /wp-json/: the REST endpoint keeps returning 200 even
+# while the public site is broken, which would make automate mode declare the
+# first disabled plugin "the fix" on every run.
+#
+# Beyond a hard error, a plugin can also break a site by making it crawl or hang,
+# so a slow load and a timeout count as broken too. A slow/timed-out page is
+# re-tested once before it is blamed, so a cold cache or a one-off hiccup isn't
+# mistaken for a culprit. Every page in CHECK_PAGES (front, wp-login.php, extras)
+# must pass; the first failure is reported with its reason.
 
-    if [[ "$code" != "200" ]]; then
-        echo "FAIL"
-    elif grep -qiE 'there has been a critical error|<b>Fatal error|WordPress database error' <<<"$body"; then
-        echo "FAIL"
-    elif ! grep -qi '</html>' <<<"$body"; then
-        echo "FAIL"
-    else
-        echo "OK"
+# Body signatures of a broken WordPress page: "regex|reason".
+BROKEN_SIGNS=(
+    'there has been a critical error|critical error'
+    'Allowed memory size of [0-9]+ bytes exhausted|memory exhausted'
+    'Maximum execution time of [0-9]+ seconds? exceeded|max execution time exceeded'
+    '(Fatal|Parse) error</b>|PHP (Fatal|Parse) error|Uncaught (Error|Exception|TypeError)|PHP fatal error'
+    'Error establishing a database connection|database connection error'
+    'WordPress database error|database error'
+    'Briefly unavailable for scheduled maintenance|stuck in maintenance mode'
+)
+
+# One request to one page -> prints "OK" or "FAIL: <reason>".
+probe_page() {   # $1 kind (front|login|page), $2 url
+    local kind="$1" url="$2" resp rc meta code t body sign
+    resp=$(curl -s -k -L --max-redirs 10 -w '\n%{http_code} %{time_total}' \
+        --connect-timeout 10 --max-time "$PAGE_TIMEOUT" "$url" 2>/dev/null)
+    rc=$?
+    case "$rc" in
+        0)  ;;
+        28) echo "FAIL: timeout (no full answer in ${PAGE_TIMEOUT}s)"; return ;;
+        47) echo "FAIL: redirect loop"; return ;;
+        6|7) echo "FAIL: cannot connect"; return ;;
+        52) echo "FAIL: empty reply from server"; return ;;
+        56) echo "FAIL: connection reset"; return ;;
+        *)  echo "FAIL: request failed (curl error $rc)"; return ;;
+    esac
+    meta="${resp##*$'\n'}"
+    body="${resp%$'\n'*}"
+    code="${meta%% *}"; t="${meta##* }"
+
+    # wp-login.php is often hidden or blocked on purpose (403/404 from a
+    # hide-login plugin or a firewall) — only a server error counts there.
+    if [[ "$kind" == "login" ]]; then
+        [[ "$code" =~ ^5 ]] && { echo "FAIL: HTTP $code"; return; }
+    elif [[ "$code" != "200" ]]; then
+        echo "FAIL: HTTP $code"; return
     fi
+
+    for sign in "${BROKEN_SIGNS[@]}"; do
+        grep -qiE "${sign%|*}" <<<"$body" && { echo "FAIL: ${sign##*|}"; return; }
+    done
+    if [[ "$code" == "200" ]]; then
+        [[ -n "${body//[[:space:]]/}" ]] || { echo "FAIL: empty page (white screen)"; return; }
+        grep -qi '</html>' <<<"$body" || { echo "FAIL: page cut off mid-render (no </html>)"; return; }
+    fi
+    if awk -v t="$t" -v l="$SLOW_LIMIT" 'BEGIN{exit !(t > l)}'; then
+        printf 'FAIL: slow (%.1fs > %ss)\n' "$t" "$SLOW_LIMIT"; return
+    fi
+    echo "OK"
+}
+
+check_site() {
+    local pg kind url r
+    for pg in "${CHECK_PAGES[@]}"; do
+        kind="${pg%%|*}"; url="${pg#*|}"
+        r=$(probe_page "$kind" "$url")
+        # Slow / timeout: re-test once before blaming anything.
+        if [[ "$r" == "FAIL: slow"* || "$r" == "FAIL: timeout"* ]]; then
+            r=$(probe_page "$kind" "$url")
+        fi
+        if [[ "$r" != "OK" ]]; then
+            echo "$r — $url"
+            return
+        fi
+    done
+    echo "OK"
 }
 
 # ---------- Resolved Check (sets RESOLVED to yes/no) ----------
@@ -569,7 +671,7 @@ linear_search() {
         else
             RESULT=$(check_site)
             info "Site status: $RESULT"
-            [[ "$RESULT" == "FAIL" ]] && broke="yes"
+            [[ "$RESULT" != "OK" ]] && broke="yes"
         fi
 
         if [[ "$broke" == "yes" ]]; then
@@ -807,7 +909,7 @@ restore_wpconfig() {   # $1 wp-config path
 # culprit.
 extract_plugin_slug() {   # $1 text -> echo slug or nothing
     printf '%s' "$1" \
-        | grep -aiE 'fatal error|uncaught|PHP (Fatal|Parse|Compile)' \
+        | grep -aiE 'fatal error|uncaught|PHP (Fatal|Parse|Compile)|Allowed memory size|Maximum execution time' \
         | grep -aoiE 'wp-content/plugins/[^/"'"'"' ]+' \
         | tail -n1 | sed -E 's@.*/@@'
 }
@@ -826,9 +928,15 @@ fastpath_hunt() {
     while [ "$n" -lt "$max" ]; do
         n=$((n+1))
         slug=""
-        # 1) the live response body (display_errors shows the path directly)
+        # 1) the live response bodies (display_errors shows the path directly)
+        #    — every health-check page, so a fatal only on wp-login or a custom
+        #    page is caught too
         if [ -n "$url" ]; then
-            body=$(curl -s -L --connect-timeout 10 --max-time 25 "$url" 2>/dev/null)
+            local pg
+            body=""
+            for pg in "${CHECK_PAGES[@]:-front|$url}"; do
+                body+=$(curl -s -k -L --connect-timeout 10 --max-time "$PAGE_TIMEOUT" "${pg#*|}" 2>/dev/null)$'\n'
+            done
             slug=$(extract_plugin_slug "$body")
         fi
         # 2) an existing debug.log
