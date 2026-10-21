@@ -312,7 +312,7 @@
         <nav class="toc" role="group" aria-label="Filter by script">
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.13.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.6.3</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.8.0</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
@@ -322,6 +322,38 @@
         <div class="entries" id="entries">
 
             <!-- ============ 2026-10-21 ============ -->
+            <article class="entry" data-script="wp-core" data-date="2026-10-21">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.8.0</span><time datetime="2026-10-21">2026-10-21</time>
+                </div>
+                <ul class="en">
+                    <li>New menu option 7 / <code>--cascade</code> (<code>-c</code>): a <strong>cascading update</strong> for servers whose PHP is too old for the latest WordPress. It starts at the newest release and steps <strong>down</strong> version by version until it reaches the newest one the server&#39;s PHP supports — then installs it <strong>in Persian</strong>.</li>
+                    <li><strong>Only secure versions, live.</strong> The candidate list comes straight from WordPress&#39;s version API, which omits every release WordPress deems insecure — so the cascade can never land on a known-vulnerable version. Each offer carries its minimum PHP, which is what the step-down compares against (<code>skipping 7.1.3 (needs PHP ≥ 7.4)</code>…).</li>
+                    <li><strong>PHP detection, then confirm.</strong> Reads the version from the site&#39;s cPanel/LiteSpeed <code>.htaccess</code> handler or the CLI <code>php</code>, shows it, and lets you confirm or override — the CLI PHP is often not the one the site runs on. <code>--php &lt;ver&gt;</code> sets it outright; with <code>-y</code> the detected value is used unattended.</li>
+                    <li><strong>Persian by itself.</strong> The core is the secure <strong>English</strong> build of the chosen version; on top of it the matching <code>fa_IR</code> translation pack for that exact version is dropped into <code>wp-content/languages/</code> and the site language is set to <code>fa_IR</code> in the database — a fully Persian, RTL site on a secure core. If no Persian pack exists for the chosen version it says so and stays English; it never downgrades to an insecure release just to get Persian.</li>
+                    <li><strong>Keeps the original core.</strong> Backs the current core into <code>old-core/</code> as usual, but never clobbers an existing backup — a previous one is rolled aside to <code>old-core-&lt;timestamp&gt;/</code>, so the site&#39;s original core is always recoverable.</li>
+                </ul>
+                <ul class="fa">
+                    <li>گزینهٔ تازهٔ ۷ در منو / <code>--cascade</code> (<code>-c</code>): یک <strong>آپدیت آبشاری</strong> برای سرورهایی که PHPشان برای آخرین وردپرس خیلی قدیمی است. از جدیدترین نسخه شروع می‌کند و پله‌پله <strong>پایین</strong> می‌آید تا به جدیدترین نسخه‌ای برسد که PHPِ سرور پشتیبانی می‌کند — بعد آن را <strong>فارسی</strong> نصب می‌کند.</li>
+                    <li><strong>فقط نسخه‌های امن، لحظه‌ای.</strong> لیست کاندیدها مستقیم از API نسخه‌های وردپرس می‌آید که هر نسخهٔ ناامن را حذف کرده — پس آبشار هرگز روی نسخهٔ آسیب‌پذیرِ شناخته‌شده نمی‌نشیند. هر نسخه حداقل PHP خودش را همراه دارد و پله‌پایین با همان مقایسه می‌کند (<code>skipping 7.1.3 (needs PHP ≥ 7.4)</code>…).</li>
+                    <li><strong>تشخیص PHP، بعد تأیید.</strong> نسخه را از خطِ handler در <code>.htaccess</code> (cPanel/LiteSpeed) یا <code>php</code>ِ خط‌فرمان می‌خواند، نشان می‌دهد و اجازهٔ تأیید/اصلاح می‌دهد — چون PHP خط‌فرمان اغلب همانی نیست که سایت با آن اجرا می‌شود. <code>--php &lt;ver&gt;</code> مستقیم ستش می‌کند؛ با <code>-y</code> مقدار تشخیص‌داده‌شده بدون سؤال به‌کار می‌رود.</li>
+                    <li><strong>خودش فارسی می‌کند.</strong> هسته همان بیلدِ <strong>انگلیسیِ امنِ</strong> نسخهٔ انتخاب‌شده است؛ روی آن، پکِ ترجمهٔ <code>fa_IR</code> همان نسخه در <code>wp-content/languages/</code> ریخته و زبان سایت در دیتابیس روی <code>fa_IR</code> ست می‌شود — یک سایت کاملاً فارسی و RTL روی هستهٔ امن. اگر پک فارسیِ آن نسخه نبود می‌گوید و انگلیسی می‌ماند؛ هرگز فقط برای فارسی‌شدن به نسخهٔ ناامن پایین نمی‌رود.</li>
+                    <li><strong>هستهٔ اولیه را نگه می‌دارد.</strong> هستهٔ فعلی را طبق معمول در <code>old-core/</code> بکاپ می‌گیرد، ولی هرگز بکاپ موجود را خراب نمی‌کند — بکاپ قبلی به <code>old-core-&lt;timestamp&gt;/</code> منتقل می‌شود، پس هستهٔ اولیهٔ سایت همیشه قابل‌بازگردانی است.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="wp-core" data-date="2026-10-21">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.7.0</span><time datetime="2026-10-21">2026-10-21</time>
+                </div>
+                <ul class="en">
+                    <li>New admin-submenu option 4: <strong>generate a one-time login link</strong>. Pick an administrator from the list and get a passwordless URL that signs you straight into wp-admin as that user — <strong>valid for 2 minutes and usable exactly once</strong>. The link goes through the site&#39;s home URL, so login-hiding plugins don&#39;t get in the way. Hand it out instead of a password.</li>
+                    <li>How it works: a tiny <strong>must-use plugin</strong> is dropped into <code>wp-content/mu-plugins/</code> (honouring a custom <code>WP_CONTENT_DIR</code>/<code>WPMU_PLUGIN_DIR</code>) with a random 48-hex token; on the first matching hit it signs the user in and <strong>deletes itself</strong>, so the link can never be reused. A cleanup process <strong>fully detached from the SSH session</strong> (<code>setsid</code>, surviving an SSH hang-up) removes the file ~30s after it expires <strong>even if nobody clicks it</strong> — no stray auto-login drop-in is ever left behind. The file is written with the core&#39;s own owner and permissions. This is the one wp-core feature that runs the site&#39;s PHP, so the front end must be alive — but if it isn&#39;t, the admin couldn&#39;t have logged in any other way either.</li>
+                </ul>
+                <ul class="fa">
+                    <li>گزینهٔ تازهٔ ۴ در زیرمنوی مدیریت: <strong>ساخت لینک ورود یکبار‌مصرف</strong>. یک مدیر را از لیست انتخاب می‌کنید و یک آدرس بدون‌رمز می‌گیرید که مستقیم شما را به‌عنوان همان کاربر وارد wp-admin می‌کند — <strong>۲ دقیقه معتبر و دقیقاً یک‌بار قابل استفاده</strong>. لینک از آدرس اصلی سایت می‌گذرد، پس افزونه‌های مخفی‌کنندهٔ صفحهٔ ورود مزاحمش نمی‌شوند. به‌جای رمز، این را بدهید.</li>
+                    <li>چطور کار می‌کند: یک <strong>must-use plugin</strong> کوچک با یک توکن تصادفی ۴۸‌رقمیِ هگز داخل <code>wp-content/mu-plugins/</code> گذاشته می‌شود (با رعایت <code>WP_CONTENT_DIR</code>/<code>WPMU_PLUGIN_DIR</code> دلخواه)؛ در اولین درخواست منطبق، کاربر را وارد می‌کند و <strong>خودش را پاک می‌کند</strong> تا لینک هرگز دوباره استفاده نشود. یک پراسس پاک‌سازی که <strong>کاملاً از نشست SSH جداست</strong> (<code>setsid</code>، مقاوم در برابر قطع‌شدن SSH) حدود ۳۰ ثانیه پس از انقضا فایل را حذف می‌کند <strong>حتی اگر کسی کلیک نکند</strong> — هیچ drop-in ورود خودکاری جا نمی‌ماند. فایل با مالک و دسترسیِ خودِ هسته نوشته می‌شود. این تنها قابلیت wp-core است که PHP سایت را اجرا می‌کند، پس فرانت‌اند باید سالم باشد — ولی اگر نباشد، مدیر از هیچ راه دیگری هم نمی‌توانست وارد شود.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="plugin-hunter" data-date="2026-10-21">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.13.0</span><time datetime="2026-10-21">2026-10-21</time>
                 </div>

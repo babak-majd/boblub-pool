@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.6.3
+#   Version   : 1.8.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.6.3"
+VERSION="1.8.0"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -77,6 +77,12 @@ Options:
                           A bare positional path works too.
   -r, --repair            Repair the currently installed version.
   -u, --update            Update the core to the latest version.
+  -c, --cascade           Cascading update: from the latest safe release step
+                          down to the newest one the server's PHP supports, then
+                          install it as a Persian (fa_IR) site. Only versions
+                          WordPress still deems secure are ever considered.
+      --php <ver>         PHP version to match for --cascade (e.g. 8.1). When
+                          omitted it is auto-detected and you are asked to confirm.
   -i, --install           Install a specific version (see -V; asked if omitted).
   -b, --rollback          Roll back to the previous core (old-core/).
   -f, --fresh             Fresh install — provision a brand-new site.
@@ -99,6 +105,8 @@ Options:
 Examples:
   wp-core.sh
   wp-core.sh -d site.ir --update
+  wp-core.sh -d site.ir --cascade                # auto-detect PHP, confirm, go Persian
+  wp-core.sh -d site.ir --cascade --php 7.4 -y   # non-interactive
   wp-core.sh -p /home/u/public_html --install --version 6.8.3 -y
   wp-core.sh -d site.ir --fresh --version latest -y
   wp-core.sh -d site.ir --admin-user bob --admin-email bob@site.ir
@@ -119,6 +127,7 @@ ADMIN_USER=""
 ADMIN_EMAIL=""
 ADMIN_PASS=""
 ADMIN_CREATE=""
+PHP_OVERRIDE=""
 
 # Only one action may be chosen at a time; a second one is a usage error.
 set_action() {
@@ -138,6 +147,8 @@ while [ $# -gt 0 ]; do
         -Z|--custom-zip) [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; CUSTOM_ZIP="$2"; shift 2 ;;
         -r|--repair)   set_action repair;   shift ;;
         -u|--update)   set_action update;   shift ;;
+        -c|--cascade)  set_action cascade;  shift ;;
+        --php)         [ -n "$2" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; PHP_OVERRIDE="$2"; shift 2 ;;
         -i|--install)  set_action install;  shift ;;
         -b|--rollback) set_action rollback; shift ;;
         -f|--fresh)    set_action fresh;    shift ;;
@@ -224,6 +235,116 @@ version_urls() {
         URL_IR="http://mirror-ir.iswps.ir/core/wp$v.zip"
         URL_ORG="https://wordpress.org/wordpress-$v.zip"
     fi
+}
+
+#############################################
+#  CASCADING UPDATE — helpers
+#############################################
+# Everything here reads the LIVE WordPress API. version-check only ever offers
+# security-supported releases (insecure ones are omitted outright), so the
+# cascade physically cannot land on a known-vulnerable version. The matching
+# Persian build comes from the per-version translation pack, which exists for
+# every one of those secure releases — so the site ends up on a secure core and
+# fully in Persian, with no reliance on the (incomplete) fa.wordpress.org zips.
+WP_OFFERS_API="https://api.wordpress.org/core/version-check/1.7/?version=4.0&locale=fa_IR"
+WP_L10N_BASE="https://downloads.wordpress.org/translation/core"
+
+# GET a URL to stdout with whichever fetcher is present.
+http_get() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 15 --max-time 90 "$1"
+    else
+        wget -qO- --timeout=90 "$1"
+    fi
+}
+
+# Does a URL exist? One ranged byte, so it costs almost nothing.
+url_exists() {
+    local code
+    if command -v curl >/dev/null 2>&1; then
+        code=$(curl -s -r 0-0 -o /dev/null -w '%{http_code}' --connect-timeout 15 "$1" 2>/dev/null)
+        [[ "$code" == "200" || "$code" == "206" ]]
+    else
+        wget -q --spider "$1" 2>/dev/null
+    fi
+}
+
+# Newest-first list of "<version> <min_php>", straight from the live API. Each
+# offer carries the PHP it needs; only secure versions are present. Duplicate
+# version rows (upgrade + autoupdate) collapse to the first, highest one.
+fetch_safe_offers() {
+    http_get "$WP_OFFERS_API" \
+      | grep -oE '"version":"[^"]+","php_version":"[^"]+"' \
+      | sed -E 's/"version":"([^"]+)","php_version":"([^"]+)"/\1 \2/' \
+      | awk 'NF==2 && !seen[$1]++'
+}
+
+# A >= B for dotted versions (sort -V does the heavy lifting).
+ver_ge() {
+    [ "$1" = "$2" ] && return 0
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V 2>/dev/null | head -n1)" = "$2" ]
+}
+
+# Best-effort guess of the PHP the SITE runs under. Always shown and overridable,
+# because the CLI php is frequently not the web one.
+SERVER_PHP=""
+PHP_SRC=""
+detect_server_php() {
+    local raw
+    SERVER_PHP=""; PHP_SRC=""
+    # cPanel EA4 / LiteSpeed handler lines name the version: ea-php82, lsphp81…
+    if [[ -f ".htaccess" ]]; then
+        raw=$(grep -oiE '(ea-php|lsphp|x-httpd-ea-php|x-httpd-php)[0-9]{2}' .htaccess 2>/dev/null \
+              | grep -oE '[0-9]{2}' | head -n1)
+        if [[ -n "$raw" ]]; then
+            SERVER_PHP="${raw:0:1}.${raw:1:1}"; PHP_SRC=".htaccess handler"; return
+        fi
+    fi
+    # Otherwise the CLI interpreter (best available signal).
+    if command -v php >/dev/null 2>&1; then
+        raw=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION.".".PHP_RELEASE_VERSION;' 2>/dev/null)
+        [[ "$raw" =~ ^[0-9] ]] || raw=$(php -v 2>/dev/null | sed -nE '1s/^PHP ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+        [[ -n "$raw" ]] && { SERVER_PHP="$raw"; PHP_SRC="php CLI"; }
+    fi
+}
+
+# Lay down the Persian translation for an exact version and flip the site's
+# language to Persian in the database. The core itself stays the secure English
+# build; these .mo/.po/.json files make wp-admin and the front end Persian (and
+# RTL). Returns non-zero without touching the DB if the pack can't be installed.
+localize_fa() {
+    local v="$1" lurl stage langdir
+    lurl="${WP_L10N_BASE}/${v}/fa_IR.zip"
+    echo -e "${BLUE}↓ Fetching the Persian language pack for ${v}...${NC}"
+    if ! url_exists "$lurl"; then
+        echo -e "${YELLOW}⚠ No Persian language pack for ${v}; leaving the site in English.${NC}"
+        return 1
+    fi
+    stage=$(mktemp -d) || return 1
+    if ! wget -O "$stage/fa.zip" "$lurl" || ! unzip -q -o "$stage/fa.zip" -d "$stage/fa"; then
+        echo -e "${YELLOW}⚠ Could not download/extract the Persian pack; leaving the site in English.${NC}"
+        rm -rf "$stage"; return 1
+    fi
+    langdir="wp-content/languages"
+    mkdir -p "$langdir"
+    cp -R "$stage/fa/." "$langdir/" 2>/dev/null
+    rm -rf "$stage"
+    [[ -n "$OWNER" ]] && chown -R "$OWNER:$GROUP" "$langdir" 2>/dev/null
+    find "$langdir" -type d -exec chmod 755 {} + 2>/dev/null
+    find "$langdir" -type f -exec chmod 644 {} + 2>/dev/null
+
+    # Switch the site language (the WPLANG option drives it since WP 4.0).
+    if wpdb_init; then
+        wpdb_query >/dev/null 2>&1 <<SQL
+INSERT INTO \`${WPDB_PREFIX}options\` (option_name, option_value)
+VALUES ('WPLANG', 'fa_IR')
+ON DUPLICATE KEY UPDATE option_value = 'fa_IR';
+SQL
+        echo -e "${GREEN}✔ Persian files installed and site language set to fa_IR.${NC}"
+    else
+        echo -e "${YELLOW}⚠ Persian files installed, but the DB was unreachable — set Site Language to فارسی in wp-admin.${NC}"
+    fi
+    return 0
 }
 
 # Extract wp.zip and normalize its contents into ./wordpress, whether the zip
@@ -968,6 +1089,95 @@ SQL
     fi
 }
 
+# One-time, passwordless login link. We drop a tiny must-use plugin that, on the
+# first hit carrying the right token, signs the chosen admin in and deletes
+# itself — so the link works exactly once. A detached cleanup process removes the
+# file after a short grace window even if nobody ever clicks, so a stray
+# auto-login drop-in can never be left behind.
+#
+# This is the one place wp-core runs site PHP: the front end must be alive. If it
+# is down the admin could not log in by any means anyway, so that is no new risk.
+wpdb_login_link() {
+    local uid="$1" ttl="${2:-120}" grace token now expires mudir mufile def cdir
+
+    [[ "$uid" =~ ^[0-9]+$ ]] || { echo -e "${RED}✘ Bad user id.${NC}" >&2; return 1; }
+    wp_info >/dev/null 2>&1
+    [[ -n "$WPC_HOME_URL" ]] || { echo -e "${RED}✘ Could not read the site URL.${NC}" >&2; return 1; }
+
+    # Where must-use plugins live — honour a custom, absolute location if wp-config
+    # declares one, otherwise the standard wp-content/mu-plugins.
+    mudir="wp-content/mu-plugins"
+    def=$(wpconf_define WPMU_PLUGIN_DIR)
+    if [[ "$def" == /* ]]; then
+        mudir="$def"
+    else
+        cdir=$(wpconf_define WP_CONTENT_DIR)
+        [[ "$cdir" == /* ]] && mudir="$cdir/mu-plugins"
+    fi
+
+    token=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 48)
+    [[ ${#token} -eq 48 ]] || { echo -e "${RED}✘ Could not generate a token.${NC}" >&2; return 1; }
+    now=$(date +%s); expires=$((now + ttl))
+    mufile="${mudir}/bobclub-login-${token:0:12}.php"
+
+    mkdir -p "$mudir" 2>/dev/null || { echo -e "${RED}✘ Cannot create ${mudir}.${NC}" >&2; return 1; }
+
+    cat > "$mufile" <<'PHP' || { echo -e "${RED}✘ Cannot write ${mufile}.${NC}" >&2; return 1; }
+<?php
+/* bobclub — one-time login link. Auto-generated; self-destructs on use or expiry. */
+add_action('init', function () {
+    if (empty($_GET['bobclub_login'])) {
+        return;
+    }
+    $token   = '__BOBCLUB_TOKEN__';
+    $uid     = __BOBCLUB_UID__;
+    $expires = __BOBCLUB_EXPIRES__;
+    if (!hash_equals($token, (string) $_GET['bobclub_login'])) {
+        return;
+    }
+    @unlink(__FILE__);            // single-use: remove it before we act on it
+    if (time() > $expires) {
+        return;                   // expired: the file is already gone
+    }
+    if (!get_user_by('id', $uid)) {
+        return;
+    }
+    wp_set_current_user($uid);
+    wp_set_auth_cookie($uid, false, is_ssl());
+    wp_safe_redirect(admin_url());
+    exit;
+});
+PHP
+
+    sed -i -e "s/__BOBCLUB_TOKEN__/${token}/" \
+           -e "s/__BOBCLUB_UID__/${uid}/" \
+           -e "s/__BOBCLUB_EXPIRES__/${expires}/" "$mufile"
+
+    chmod 644 "$mufile" 2>/dev/null
+    if [[ -n "$OWNER" ]]; then
+        chown "$OWNER:$GROUP" "$mufile" 2>/dev/null
+        chown "$OWNER:$GROUP" "$mudir" 2>/dev/null
+    fi
+
+    # Guaranteed cleanup, fully detached from this SSH session: a new session
+    # (setsid) with every fd closed, so an SSH hang-up (SIGHUP) never reaches it.
+    # It waits past the link's lifetime, then removes the file whether or not it
+    # was ever used. rm -f on an already-gone file is a no-op.
+    grace=$((ttl + 30))
+    if command -v setsid >/dev/null 2>&1; then
+        setsid bash -c 'sleep "$1"; rm -f "$2"' _ "$grace" "$mufile" </dev/null >/dev/null 2>&1 &
+    else
+        nohup  bash -c 'sleep "$1"; rm -f "$2"' _ "$grace" "$mufile" </dev/null >/dev/null 2>&1 &
+    fi
+    disown 2>/dev/null || true
+
+    echo
+    echo -e "${GREEN}✔ One-time login link (valid ${ttl}s, usable once):${NC}"
+    echo -e "   ${YELLOW}${WPC_HOME_URL%/}/?bobclub_login=${token}${NC}"
+    echo -e "${BLUE}   Drop-in:${NC} ${mufile}"
+    echo -e "${BLUE}   Auto-removes in ${grace}s even if unused; vanishes the moment it is used.${NC}"
+}
+
 # --admin-user/--admin-email/--admin-pass (or -A -y): create without prompting.
 create_admin_auto() {
     wpdb_require || return 1
@@ -1005,8 +1215,9 @@ manage_admins() {
     echo -e "${YELLOW}1) List administrator accounts${NC}"
     echo -e "${YELLOW}2) Change an administrator's password${NC}"
     echo -e "${YELLOW}3) Create a new administrator${NC}"
+    echo -e "${YELLOW}4) Generate a one-time login link${NC}"
     echo
-    read -p "$(echo -e ${GREEN}"Enter choice [1-3]: "${NC})" achoice
+    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" achoice
 
     case $achoice in
         1)
@@ -1045,6 +1256,17 @@ manage_admins() {
                 print_login_url
             fi
             ;;
+        4)
+            echo
+            echo -e "${BLUE}Administrators:${NC}"
+            wpdb_list_admins
+            echo
+            read -p "$(echo -e ${CYAN}'Login to sign in as: '${NC})" A_LOGIN
+            [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
+            A_UID=$(wpdb_query <<< "SELECT ID FROM \`${WPDB_PREFIX}users\` WHERE user_login = '$(sql_escape "$A_LOGIN")';")
+            [[ -n "$A_UID" ]] || { echo -e "${RED}✘ User '${A_LOGIN}' not found.${NC}"; return 1; }
+            wpdb_login_link "$A_UID" 120
+            ;;
         *)
             echo -e "${RED}Invalid choice!${NC}"
             return 1
@@ -1063,6 +1285,7 @@ if [ -n "$ACTION" ]; then
     case "$ACTION" in
         repair)   action="repair" ;;
         update)   action="update" ;;
+        cascade)  action="cascade" ;;
         install)  action="custom"
                   [ -n "$REQ_VERSION" ] && CUSTOM_VERSION="$REQ_VERSION" ;;
         rollback) action="rollback" ;;
@@ -1121,9 +1344,10 @@ echo -e "${YELLOW}3) Install WordPress 6.9.5${NC}"
 echo -e "${YELLOW}4) Install custom version${NC}"
 echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo -e "${YELLOW}6) Manage administrator users${NC}"
+echo -e "${YELLOW}7) Cascading update — newest safe version your PHP supports, in Persian${NC}"
 echo
 
-read -p "$(echo -e ${GREEN}"Enter choice [1-6]: "${NC})" choice
+read -p "$(echo -e ${GREEN}"Enter choice [1-7]: "${NC})" choice
 
 case $choice in
     1) action="repair" ;;
@@ -1132,6 +1356,7 @@ case $choice in
     4) action="custom" ;;
     5) action="rollback" ;;
     6) manage_admins; exit $? ;;
+    7) action="cascade" ;;
     *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
 esac
 
@@ -1205,6 +1430,7 @@ fi
 #############################################
 
 PKG_VERSION=""
+CASCADE_MODE=""
 
 if [[ "$action" == "repair" ]]; then
     if [[ -z "$WP_VERSION" ]]; then
@@ -1213,6 +1439,52 @@ if [[ "$action" == "repair" ]]; then
     fi
     echo -e "${GREEN}✔ Installed Version: $WP_VERSION${NC}"
     PKG_VERSION="$WP_VERSION"
+
+elif [[ "$action" == "cascade" ]]; then
+    echo
+    echo -e "${CYAN}Cascading update — newest SAFE version your PHP supports, in Persian.${NC}"
+
+    # 1) Live, security-filtered version list (newest first, with each min PHP).
+    echo -e "${BLUE}Fetching the live WordPress version list...${NC}"
+    OFFERS=$(fetch_safe_offers)
+    [[ -n "$OFFERS" ]] || { echo -e "${RED}✘ Could not fetch the WordPress version list (network/API).${NC}"; exit 1; }
+    LATEST_SAFE=$(printf '%s\n' "$OFFERS" | head -n1 | awk '{print $1}')
+    echo -e "${GREEN}✔ Latest safe release:${NC} ${LATEST_SAFE}"
+
+    # 2) Decide which PHP to match against: --php, else auto-detect + confirm.
+    if [[ -n "$PHP_OVERRIDE" ]]; then
+        SERVER_PHP="$PHP_OVERRIDE"; PHP_SRC="--php"
+    else
+        detect_server_php
+        if [[ -n "$SERVER_PHP" ]]; then
+            echo -e "${GREEN}✔ Detected server PHP:${NC} ${SERVER_PHP} ${BLUE}(${PHP_SRC})${NC}"
+        else
+            echo -e "${YELLOW}⚠ Could not auto-detect the server PHP version.${NC}"
+        fi
+        if [[ "$ASSUME_YES" != "yes" ]]; then
+            read -p "$(echo -e ${CYAN}"Server PHP version [${SERVER_PHP:-type it, e.g. 8.1}]: "${NC})" _phpin
+            [[ -n "$_phpin" ]] && SERVER_PHP="$_phpin"
+        fi
+    fi
+    [[ -n "$SERVER_PHP" ]] || { echo -e "${RED}✘ No PHP version to match against. Re-run with --php X.Y.${NC}"; exit 1; }
+    [[ "$SERVER_PHP" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo -e "${RED}✘ Not a PHP version: ${SERVER_PHP}${NC}"; exit 1; }
+
+    # 3) Walk newest→oldest; first release whose required PHP is met wins.
+    PICK_REQ=""
+    while read -r _cand _req; do
+        [[ -n "$_cand" ]] || continue
+        if ver_ge "$SERVER_PHP" "$_req"; then
+            PKG_VERSION="$_cand"; PICK_REQ="$_req"; break
+        fi
+        echo -e "${BLUE}  ↓ skipping ${_cand} (needs PHP ≥ ${_req})${NC}"
+    done <<< "$OFFERS"
+
+    [[ -n "$PKG_VERSION" ]] || { echo -e "${RED}✘ Even the oldest safe version needs a newer PHP than ${SERVER_PHP}. Upgrade PHP.${NC}"; exit 1; }
+    echo -e "${GREEN}✔ Selected WordPress ${PKG_VERSION}${NC} ${BLUE}(needs PHP ≥ ${PICK_REQ}; server has ${SERVER_PHP})${NC}"
+    if [[ "$PKG_VERSION" != "$LATEST_SAFE" ]]; then
+        echo -e "${YELLOW}  (The latest safe release ${LATEST_SAFE} needs a newer PHP than this server has.)${NC}"
+    fi
+    CASCADE_MODE="1"
 
 elif [[ "$action" == "update" ]]; then
     PKG_VERSION="latest"
@@ -1252,6 +1524,16 @@ get_wp_package "$PKG_VERSION" || exit 1
 #  MOVE OLD CORE INSTEAD OF REMOVING
 #############################################
 
+# Cascade keeps the site's original core: never clobber an existing backup. If
+# one is already here from a previous run, roll it aside with a timestamp so
+# nothing is ever lost — old-core still holds the core we are about to replace,
+# so rollback keeps working, and every earlier backup survives too.
+if [[ "$CASCADE_MODE" == "1" && -d "old-core" ]] && { [[ -d "old-core/wp-admin" ]] || [[ -d "old-core/wp-includes" ]]; }; then
+    _octs=$(date +%Y%m%d-%H%M%S)
+    echo -e "${BLUE}Preserving the existing backup as old-core-${_octs}...${NC}"
+    mv old-core "old-core-${_octs}" 2>/dev/null
+fi
+
 echo -e "${BLUE}Creating old-core directory...${NC}"
 mkdir -p old-core
 
@@ -1285,6 +1567,16 @@ apply_permissions
 
 
 #############################################
+#  CASCADE — make the site Persian
+#############################################
+# Secure English core is now in place; localise the very same version to Persian
+# and switch the site language in the DB.
+if [[ "$CASCADE_MODE" == "1" ]]; then
+    localize_fa "$PKG_VERSION"
+fi
+
+
+#############################################
 #  DONE
 #############################################
 
@@ -1300,6 +1592,9 @@ if [[ -n "$NEW_WP_VERSION" ]]; then
     echo -e "${GREEN}✔ Installed version: ${NEW_WP_VERSION}${NC}"
 else
     echo -e "${YELLOW}⚠ Could not read the installed version from wp-includes/version.php.${NC}"
+fi
+if [[ "$CASCADE_MODE" == "1" ]]; then
+    echo -e "${GREEN}✔ Chosen as the newest secure release the server's PHP (${SERVER_PHP}) supports.${NC}"
 fi
 echo -e "${GREEN}✔ Login to admin panel and clear cache if required.${NC}"
 echo

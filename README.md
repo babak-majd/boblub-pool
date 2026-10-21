@@ -76,8 +76,24 @@ Every script prints its version in its terminal header. Full per-script release 
 | **4** | Install custom version | You type the version (e.g. `6.8.3`) and it installs exactly that. |
 | **5** | Rollback to previous core | Restores the core that was replaced last time, from `old-core/`. Your undo button. |
 | **6** | Manage administrator users | Opens the admin submenu below. |
+| **7** | Cascading update (safe + PHP-compatible, Persian) | Starts at the **latest secure** release and steps **down** version by version until it reaches the newest one the server's PHP actually supports, installs it, and makes the site **Persian**. See below. |
 
 Options 1–4 all copy the current core into **`old-core/`** first, so option 5 can always bring it back.
+
+### Cascading update (option 7, or `--cascade` / `-c`)
+
+For a server whose PHP is too old for the very latest WordPress, this finds the newest version that *will* run and installs it in Persian — without ever touching an insecure release.
+
+1. **Only secure versions, live.** It reads WordPress's own version API, which omits every release WordPress deems insecure. So the candidate list is security-filtered at the source — the cascade physically cannot land on a known-vulnerable version.
+2. **Steps down from the latest.** The API gives each version's minimum PHP. Starting at the newest secure release, it walks down (`skipping 7.1.3 (needs PHP ≥ 7.4)`, …) and stops at the first one your server's PHP satisfies.
+3. **Detects your PHP, then asks.** It reads the version from the site's cPanel/LiteSpeed `.htaccess` handler, or the CLI `php`, shows it, and lets you confirm or override — because the CLI PHP is often not the one the site runs on. `--php 8.1` sets it outright; with `-y` the detected value is used unattended.
+4. **Makes it Persian itself.** The core is the secure **English** build of the chosen version; on top of it the script downloads the matching **`fa_IR` translation pack** for that exact version, drops it into `wp-content/languages/`, and sets the site language to `fa_IR` in the database. The result is a fully Persian (and RTL) site on a secure core. (If a Persian pack is ever missing for the chosen version, it says so and leaves the site in English — it never downgrades to an insecure release just to get Persian.)
+5. **Keeps your original core.** Like the other actions it backs the current core into `old-core/`, but it never clobbers an existing backup — a previous one is rolled aside to `old-core-<timestamp>/`, so the site's original core is always recoverable.
+
+```bash
+sudo ./wp-core.sh -d site.ir --cascade                # auto-detect PHP, confirm, go Persian
+sudo ./wp-core.sh -d site.ir --cascade --php 7.4 -y    # non-interactive
+```
 
 ### The administrator submenu (option 6):
 
@@ -86,12 +102,15 @@ Options 1–4 all copy the current core into **`old-core/`** first, so option 5 
 | **1** | List administrator accounts | Shows every admin: login, email, ID. Useful when you inherit a site and don't know who's in it. |
 | **2** | Change an administrator's password | You give a login, it sets a new password and signs every other session out. **Gets you back in when you're locked out.** |
 | **3** | Create a new administrator | Makes a brand-new admin. Press Enter at the login prompt and it takes the first free name in the `admin`, `admin1`, `admin2`… series — the suggestion is shown in parentheses. Leave the password blank and one is generated. |
+| **4** | Generate a one-time login link | Pick an admin from the list and get a passwordless link that signs you straight into wp-admin as that user. **Valid for 2 minutes and usable exactly once** — the link works via the site's home URL, so login-hiding plugins don't get in the way. **Hand it out instead of a password.** |
 
-This talks to **MySQL directly**, using the credentials already in `wp-config.php` — no PHP, no WordPress bootstrap, no plugin code executed. That matters because the `php` binary on a server is often not the version the site runs on, and loading WordPress with the wrong one fatals. It also means the submenu works **even when wp-admin is completely dead**, and even when the site's PHP is broken outright.
+Options 1–3 talk to **MySQL directly**, using the credentials already in `wp-config.php` — no PHP, no WordPress bootstrap, no plugin code executed. That matters because the `php` binary on a server is often not the version the site runs on, and loading WordPress with the wrong one fatals. It also means the submenu works **even when wp-admin is completely dead**, and even when the site's PHP is broken outright.
 
 The submenu header also reports the **real login URL**, read out of `wp_options`: if a login-hiding plugin has moved `wp-login.php`, the moved address is shown along with the plugin that did it (WPS Hide Login, Rename wp-login.php, Hide My WP Ghost, All In One WP Security, Defender, WP Cerber, Perfmatters, Solid Security). The same line appears next to the WordPress version on the main menu.
 
 A newly created password is stored in WordPress's legacy MD5 format, which WordPress accepts and silently upgrades to its modern hash the first time the account signs in.
+
+The one-time login link (option 4) is the single place wp-core runs the site's own PHP: it drops a tiny must-use plugin into `wp-content/mu-plugins/` that signs the chosen admin in on the first request carrying a random 48-hex token, then **deletes itself** so the link can never be used twice. A cleanup process, fully detached from your SSH session (`setsid`, so an SSH hang-up can't kill it), removes the file about 30 seconds after the link expires **even if nobody ever clicks it** — no stray auto-login drop-in is left behind. The drop-in is written with the same owner and permissions as the rest of the core, and because this one feature executes WordPress, the site's front end has to be alive — but if it isn't, the admin couldn't have logged in by any route anyway.
 
 ### If WordPress is *not* installed:
 
