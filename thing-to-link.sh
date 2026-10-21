@@ -3,11 +3,12 @@
 #   bobclub.ir  ·  Thing To Link
 #   Publish a file, directory, or URL and hand back a download
 #   link. Three backends, and only the ones this box actually has
-#   are offered:
+#   are offered — in this order of preference (the first available
+#   one is the default):
 #     • web root    — classic copy into /var/www/html (served by
 #                     the running web server; stays until removed)
-#     • php link    — a throwaway `php -S` on a random free port
-#     • python link — a throwaway python server, same behaviour
+#     • python link — a throwaway python server on a random free port
+#     • php link    — a throwaway `php -S`, same behaviour
 #   A temporary (php/python) link serves EXACTLY one file behind a
 #   random token path, opens its port in the firewall for the life
 #   of the run, and tears everything down when your SSH session
@@ -16,9 +17,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.2.0
+#   Version   : 1.3.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.2.0"
+VERSION="1.3.0"
 set +H
 
 WEBROOT="/var/www/html"
@@ -41,10 +42,17 @@ Usage: thing-to-link.sh [options] [input]
 
 Publish a file, directory, or URL and get a download link. Only the backends
 this server actually has are offered; anything you omit is asked for.
+The default backend is the first one available, in this order:
+web root  →  python link  →  php link   (Enter at the menu picks it).
 
 Options:
   -i, --input <path|url>  File, directory, or URL to publish. A bare positional
                           value works too.
+      --default           Use the default backend (first available of web root
+                          → python → php) without showing the menu.
+      --web               Use the classic web-root copy into /var/www/html.
+      --python            Temporary link served by python  (= --serve python).
+      --php               Temporary link served by php     (= --serve php).
       --serve <php|python>  Temporary-link backend: a throwaway server on a
                           random port, one file behind a random token, firewall
                           port opened for the run and closed on teardown.
@@ -66,6 +74,7 @@ Notes:
 
 Examples:
   thing-to-link.sh
+  thing-to-link.sh -i /root/backup.tar.gz --default -t 2h
   thing-to-link.sh -i /root/backup.tar.gz --serve php -t 2h
   thing-to-link.sh -i https://example.com/file.zip --serve python
   thing-to-link.sh -i /home/user/backups -c zip --webroot /var/www/html
@@ -74,7 +83,7 @@ EOF
 
 input=""
 COMPRESS=""
-MODE=""                 # webroot | php | python — resolved from flags or the menu
+MODE=""                 # webroot | php | python | default — resolved from flags or the menu
 TIMEOUT_RAW=""
 
 while [ $# -gt 0 ]; do
@@ -84,6 +93,10 @@ while [ $# -gt 0 ]; do
                        case "$2" in php) MODE="php" ;; python) MODE="python" ;; *) err "--serve must be php or python."; exit 1 ;; esac
                        shift 2 ;;
         -w|--webroot)  [ -n "${2:-}" ] || { err "$1 requires a value."; exit 1; }; WEBROOT="$2"; MODE="webroot"; shift 2 ;;
+        --web)         MODE="webroot"; shift ;;
+        --python)      MODE="python";  shift ;;
+        --php)         MODE="php";     shift ;;
+        --default)     MODE="default"; shift ;;
         -c|--compress) [ -n "${2:-}" ] || { err "$1 requires a value."; exit 1; }; COMPRESS="$2"; shift 2 ;;
         -t|--timeout)  [ -n "${2:-}" ] || { err "$1 requires a value."; exit 1; }; TIMEOUT_RAW="$2"; shift 2 ;;
         -h|--help)     usage; exit 0 ;;
@@ -145,30 +158,44 @@ detect_webserver && WEB_OK=1
 PHP_BIN=$(find_php) || PHP_BIN=""
 command -v python3 >/dev/null 2>&1 && PY_BIN=$(command -v python3)
 
+# ---------- Default backend: first available of web root → python → php ----------
+DEFAULT_MODE=""
+if   [ -n "$WEB_OK" ];  then DEFAULT_MODE="webroot"
+elif [ -n "$PY_BIN" ];  then DEFAULT_MODE="python"
+elif [ -n "$PHP_BIN" ]; then DEFAULT_MODE="php"
+fi
+
 # ---------- Mode menu (dynamic: active options only) ----------
-# A --serve/--webroot flag settles the mode; otherwise list exactly the backends
-# that exist and let the operator pick. If none exist, there is nothing to do.
-if [ -z "$MODE" ]; then
-    if [ -z "$WEB_OK" ] && [ -z "$PHP_BIN" ] && [ -z "$PY_BIN" ]; then
+# A --serve/--webroot/--web/--python/--php flag settles the mode and --default
+# takes the default without asking; otherwise list exactly the backends that
+# exist (in preference order, default marked) and let the operator pick — Enter
+# picks the default. If none exist, there is nothing to do.
+if [ -z "$MODE" ] || [ "$MODE" = "default" ]; then
+    if [ -z "$DEFAULT_MODE" ]; then
         err "No web server, PHP, or Python found — nothing to serve a file with."
         info "Install one of: a web server (for the web-root copy), php-cli, or python3."
         exit 1
     fi
+fi
+if [ "$MODE" = "default" ]; then
+    MODE="$DEFAULT_MODE"
+elif [ -z "$MODE" ]; then
     info "How do you want to publish?"
     declare -A MENU=()
-    n=0
-    if [ -n "$WEB_OK" ]; then n=$((n+1)); MENU[$n]="webroot"; echo "  $n) web root     — copy into $WEBROOT (served by the running web server)"; fi
-    if [ -n "$PHP_BIN" ]; then n=$((n+1)); MENU[$n]="php";    echo "  $n) php link     — temporary php -S on a random port, dies with your SSH session"; fi
-    if [ -n "$PY_BIN" ]; then n=$((n+1)); MENU[$n]="python"; echo "  $n) python link  — temporary python server, same behaviour"; fi
-    read -r -p "Enter choice (1-$n): " CHOICE
+    n=0; def_n=""
+    if [ -n "$WEB_OK" ];  then n=$((n+1)); MENU[$n]="webroot"; echo "  $n) web root     — copy into $WEBROOT (served by the running web server)$([ "$DEFAULT_MODE" = webroot ] && echo '  [default]')"; [ "$DEFAULT_MODE" = webroot ] && def_n=$n; fi
+    if [ -n "$PY_BIN" ];  then n=$((n+1)); MENU[$n]="python";  echo "  $n) python link  — temporary python server on a random port, dies with your SSH session$([ "$DEFAULT_MODE" = python ] && echo '  [default]')"; [ "$DEFAULT_MODE" = python ] && def_n=$n; fi
+    if [ -n "$PHP_BIN" ]; then n=$((n+1)); MENU[$n]="php";     echo "  $n) php link     — temporary php -S, same behaviour$([ "$DEFAULT_MODE" = php ] && echo '  [default]')"; [ "$DEFAULT_MODE" = php ] && def_n=$n; fi
+    read -r -p "Enter choice (1-$n) [$def_n]: " CHOICE
+    [ -n "$CHOICE" ] || CHOICE="$def_n"
     MODE="${MENU[$CHOICE]:-}"
     [ -n "$MODE" ] || { err "Invalid choice."; exit 1; }
 fi
 
 # A forced backend must actually be available.
 case "$MODE" in
-    php)    [ -n "$PHP_BIN" ] || { err "PHP CLI not found — cannot use --serve php."; exit 1; } ;;
-    python) [ -n "$PY_BIN" ]  || { err "python3 not found — cannot use --serve python."; exit 1; } ;;
+    php)    [ -n "$PHP_BIN" ] || { err "PHP CLI not found — cannot use --php / --serve php."; exit 1; } ;;
+    python) [ -n "$PY_BIN" ]  || { err "python3 not found — cannot use --python / --serve python."; exit 1; } ;;
 esac
 info "Method: $MODE"
 

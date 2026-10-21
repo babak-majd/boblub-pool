@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.10.1
+#   Version   : 1.11.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.10.1"
+VERSION="1.11.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -83,6 +83,9 @@ Options:
                           pass in automate mode).
       --no-fast           Skip the fast path (see below) and go straight to the
                           full linear/binary hunt.
+      --debug             If the hunt cannot fix the site, turn WP_DEBUG on
+                          without asking (see below).
+      --no-debug          Never offer to turn WP_DEBUG on.
   -h, --help              Show this help and exit.
 
 Before the full hunt, a FAST PATH tries to skip it entirely: it reads the plugin
@@ -91,6 +94,11 @@ wp-content/debug.log, or by briefly turning on WP_DEBUG_LOG), disables just that
 plugin, and re-checks — looping for further culprits. If that fixes the site the
 long search is skipped; if not, anything it touched is undone and the normal hunt
 runs exactly as before.
+
+If the hunt CANNOT fix the site (no plugin culprit, or the fault is not a plugin
+at all), it offers to turn WordPress debugging on: WP_DEBUG, WP_DEBUG_LOG and
+WP_DEBUG_DISPLAY are each checked and switched on in wp-config.php (a timestamped
+backup is kept), so the real error shows on the page and in wp-content/debug.log.
 
 Examples:
   plugin-hunter.sh
@@ -109,6 +117,7 @@ MODE=""
 STRATEGY=""
 AUTO_ACCEPT=""
 FAST="yes"                 # try the debug-log fast path before the full hunt
+DEBUG_OFFER=""             # unresolved hunt: ""=ask, yes=turn WP_DEBUG on, no=never
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -124,6 +133,8 @@ while [ $# -gt 0 ]; do
         -b|--binary)    STRATEGY="binary"; shift ;;
         --auto-accept)  AUTO_ACCEPT="yes"; shift ;;
         --no-fast)      FAST=""; shift ;;
+        --debug)        DEBUG_OFFER="yes"; shift ;;
+        --no-debug)     DEBUG_OFFER="no"; shift ;;
         -h|--help)      usage; exit 0 ;;
         --)            shift; break ;;
         -*)            error "Unknown option: $1"; usage; exit 1 ;;
@@ -517,6 +528,7 @@ verify_baseline() {
     error "Site is still broken with every plugin disabled — the cause is not a plugin."
     info "Restoring all plugins..."
     restore_all
+    offer_wp_debug
     info "Log file: $LOG_FILE"
     exit 1
 }
@@ -579,6 +591,7 @@ linear_search() {
     echo
     if [ "${#CONFIRMED[@]}" -eq 0 ]; then
         success "Scan complete. No problematic plugin found — all re-enabled."
+        offer_wp_debug
     else
         success "Scan complete. ${#CONFIRMED[@]} problematic plugin(s) left disabled:"
         for NAME in "${CONFIRMED[@]}"; do
@@ -657,7 +670,7 @@ isolate_one() {
 
 binary_search() {
     local -a candidates=() huntable declined=()
-    local NAME on
+    local NAME on failed=""
 
     for NAME in "${PLUGS[@]}"; do
         [[ "$NAME" == *.off ]] && continue
@@ -696,6 +709,7 @@ binary_search() {
         done
         if [ "${#huntable[@]}" -eq 0 ]; then
             error "Site is broken but no plugins remain to test — a pinned dependency or a non-plugin fault."
+            failed="yes"
             break
         fi
 
@@ -705,6 +719,7 @@ binary_search() {
         if [ -z "$ISOLATED" ]; then
             error "Could not pin down a single culprit — the site breaks only on a plugin combination."
             info "Try linear mode or inspect the remaining plugins by hand."
+            failed="yes"
             break
         fi
 
@@ -740,6 +755,9 @@ binary_search() {
     fi
     [ "${#declined[@]}" -gt 0 ] && info "Flagged but kept enabled at your request: ${declined[*]}"
     [ "${#PINNED[@]}" -gt 0 ] && info "Pinned on (kept enabled): ${PINNED[*]}"
+    if [[ "$failed" == "yes" ]] || { [ "${#CONFIRMED[@]}" -eq 0 ] && [ "${#declined[@]}" -eq 0 ]; }; then
+        offer_wp_debug
+    fi
     exit 0
 }
 
@@ -851,6 +869,79 @@ fastpath_hunt() {
     done
     [ "${#changed[@]}" -gt 0 ] && info "Fast path inconclusive — re-enabled ${#changed[@]} plugin(s); running the full hunt."
     return 1
+}
+
+#############################################
+#     WP_DEBUG ON (when the hunt can't fix)  #
+#############################################
+# When no plugin turns out to be the fix, the next step is to see the real PHP
+# error. These switch WP_DEBUG, WP_DEBUG_LOG and WP_DEBUG_DISPLAY on in
+# wp-config.php — permanently, unlike the fast path's temporary log — after a
+# timestamped backup. Each constant is checked first: one already on is left
+# alone, one set to something else is flipped in place, a missing one is added
+# right after <?php. If php -l rejects the edited file, the backup is restored.
+WP_DEBUG_RE_DEF="^[[:space:]]*define\\([[:space:]]*['\"]"   # start of a define('KEY'
+enable_wp_debug() {
+    local cfg bak k
+    local -a todo=()
+    cfg=$(find_wpconfig)
+    [ -n "$cfg" ] || { error "wp-config.php not found — cannot turn WP_DEBUG on."; return 1; }
+
+    for k in WP_DEBUG WP_DEBUG_LOG WP_DEBUG_DISPLAY; do
+        if grep -qiE "${WP_DEBUG_RE_DEF}${k}['\"][[:space:]]*,[[:space:]]*true[[:space:]]*\)" "$cfg"; then
+            info "$k is already on."
+        else
+            todo+=("$k")
+        fi
+    done
+    [ "${#todo[@]}" -eq 0 ] && return 0          # nothing to change, no backup needed
+
+    bak="$cfg.plughunter-debug.$(date +%F_%H-%M-%S).bak"
+    cp -p "$cfg" "$bak" || { error "Could not back up $cfg — leaving it untouched."; return 1; }
+    for k in "${todo[@]}"; do
+        if grep -qE "${WP_DEBUG_RE_DEF}${k}['\"][[:space:]]*," "$cfg"; then
+            sed -i -E "s@(${WP_DEBUG_RE_DEF}${k}['\"][[:space:]]*,[[:space:]]*)[^)]*\)@\1true)@" "$cfg"
+            success "$k switched on."
+        else
+            sed -i -E "0,/<\?php/s@<\?php@&\ndefine('${k}', true);@" "$cfg"
+            success "$k added and switched on."
+        fi
+    done
+
+    if command -v php >/dev/null 2>&1 && ! php -l "$cfg" >/dev/null 2>&1; then
+        mv -f "$bak" "$cfg"
+        error "The edited wp-config.php failed php -l — restored the original. Turn WP_DEBUG on by hand."
+        return 1
+    fi
+    info "Backup of the original wp-config.php: $bak"
+}
+
+# Ask (or obey --debug / --no-debug), turn debugging on, then show the fresh error.
+offer_wp_debug() {
+    [[ "$DEBUG_OFFER" == "no" ]] && return 0
+    echo
+    if [[ "$DEBUG_OFFER" != "yes" ]]; then
+        local ANS
+        info "The hunt could not fix the site. WordPress debugging will show the real error."
+        read -r -p "Turn on WP_DEBUG, WP_DEBUG_LOG and WP_DEBUG_DISPLAY? [y/N]: " ANS
+        [[ "$ANS" =~ ^[Yy]$ ]] || { info "WP_DEBUG left unchanged."; return 0; }
+    fi
+    enable_wp_debug || return 0
+
+    # Re-trigger the site once so the newest error lands in the log.
+    local url="${CHECK_URL:-}"
+    [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
+    if [ -n "$url" ]; then
+        curl -s -L --connect-timeout 10 --max-time 25 "$url" >/dev/null 2>&1
+        sleep 1
+    fi
+    if [ -s "$DEBUG_LOG" ]; then
+        info "Latest lines of $DEBUG_LOG:"
+        tail -n 15 "$DEBUG_LOG"
+    else
+        info "Reload the site — errors now show on the page and in $DEBUG_LOG."
+    fi
+    error "Errors are now visible to visitors too — turn WP_DEBUG off (or restore the backup) when you're done."
 }
 
 # ---------- Dispatch ----------

@@ -47,7 +47,7 @@ sudo ./wp-core.sh
 | Script | Use it when… |
 | --- | --- |
 | [`wp-core.sh`](#-wp-coresh) | WordPress core is broken, out of date, or the site doesn't exist yet |
-| [`pro-plugin-manager.sh`](#-pro-plugin-managersh) | WooCommerce or Elementor is broken, or you need to search-replace the whole DB |
+| [`pro-plugin-manager.sh`](#-pro-plugin-managersh) | WooCommerce or Elementor is broken, you need to search-replace the whole DB, or install / toggle / remove any plugin via wp-cli |
 | [`plugin-hunter.sh`](#-plugin-huntersh) | The site is white/500 and you don't know *which* plugin did it |
 | [`perm-patrol.sh`](#-perm-patrolsh) | File ownership or permissions on a hosting account are a mess |
 | [`magic-move.sh`](#-magic-movesh) | Verifying a whole-server migration and auto-healing sites that broke in transit |
@@ -123,9 +123,9 @@ Any flag you leave out is simply asked for interactively — pasting a URL or lo
 
 ## 🔌 pro-plugin-manager.sh
 
-**A repair toolkit for the two plugins that break sites most often — WooCommerce and Elementor — plus a whole-database search & replace.**
+**A repair toolkit for the two plugins that break sites most often — WooCommerce and Elementor — plus a whole-database search & replace and a wp-cli manager for any plugin.**
 
-> ⚠️ This is *not* a general "install any plugin" tool. The main menu is exactly these four items:
+The main menu:
 
 | # | Option | What it does |
 | --- | --- | --- |
@@ -133,6 +133,7 @@ Any flag you leave out is simply asked for interactively — pasting a URL or lo
 | **2** | Elementor Manager | Same submenu, targeting `elementor`. |
 | **3** | Search And Replace | Find/replace text across **every table** in the WP database. |
 | **4** | Install latest Blue Guard | Downloads and installs the latest Blue Guard security plugin (old copy kept in `old-blue-guard/`). |
+| **5** | Plugin Manager (wp-cli) | Any plugin: install from a link or path, list, activate, deactivate, delete. |
 
 ### The plugin submenu (options 1 and 2):
 
@@ -156,6 +157,18 @@ You give an old value and a new value, then choose:
 
 Classic use: moving a site from `http://old-domain.ir` to `https://new-domain.ir`.
 
+### Plugin Manager (option 5)
+
+| # | Option | What it does |
+| --- | --- | --- |
+| **1** | Install from a link or path | Installs a plugin `.zip` from a URL or a file on the server; asks whether to activate it, and offers to overwrite if it is already installed. |
+| **2** | List plugins | `wp plugin list` — name, status, version. |
+| **3** | Activate | Activates a plugin by slug. |
+| **4** | Deactivate | Deactivates a plugin by slug. |
+| **5** | Delete | Deactivates, keeps a copy in `old-<slug>/`, deletes — and asks whether to also run the plugin's uninstall routine (removes its settings/tables). |
+
+**Why everything goes through wp-cli:** WordPress is loaded normally, so the plugin's own activation / deactivation / uninstall hooks run exactly as they do from WP-Admin. Renaming or deleting folders by hand skips those hooks and leaves the site in a state WordPress didn't create — which is what later clashes with the site owner's own WordPress.
+
 > ⚠️ **Serialized data is not length-fixed.** WordPress stores some options (widgets, theme settings, page builder data) as serialized PHP strings that embed their own character counts. A raw SQL replace of a *different-length* string breaks them. If your two values have different lengths and the site uses page builders, use `wp search-replace` from wp-cli instead — the script warns you about this too.
 
 ```bash
@@ -164,6 +177,8 @@ sudo ./pro-plugin-manager.sh
 sudo ./pro-plugin-manager.sh -d site.ir --woocommerce --update -y
 sudo ./pro-plugin-manager.sh -p /home/u/public_html -e --install --version 3.21.0
 sudo ./pro-plugin-manager.sh -d site.ir -s --old http://old.ir --new https://new.ir --dry-run
+sudo ./pro-plugin-manager.sh -d site.ir --from https://example.com/plugin.zip -y
+sudo ./pro-plugin-manager.sh -d site.ir --deactivate hello-dolly
 ```
 
 Any flag you leave out is simply asked for interactively. Run `./pro-plugin-manager.sh --help` for the full list.
@@ -195,6 +210,8 @@ Both strategies start the same way: **every plugin is disabled first**, and the 
 | **2** | binary | Isolates a culprit by bisection (~log₂n checks), then re-enables everything and re-tests: healthy → done; still broken → hunt the next one. Same complete result as linear, far fewer checks. **Recommended.** |
 
 **Fast path (tried first).** Before any of that, it asks WordPress directly *which* plugin fatally errored — reading the shown error, an existing `wp-content/debug.log`, or briefly turning on `WP_DEBUG_LOG` and re-triggering the site — then disables just that plugin and re-checks, looping for any further culprit. If that fixes the site the whole search is skipped; if the log names no plugin (e.g. the fault is in the theme), everything it touched is undone and the normal hunt runs exactly as before. Only the culprit line of a fatal is trusted, so an ordinary asset URL can't be mistaken for a culprit. Turn it off with `--no-fast`.
+
+**When it can't fix the site.** If the hunt ends without a fix — no plugin culprit, a combination it can't pin down, or a fault that isn't a plugin — it asks whether to **turn WordPress debugging on**. On yes it checks `WP_DEBUG`, `WP_DEBUG_LOG` and `WP_DEBUG_DISPLAY` in `wp-config.php` and switches each one on (already-on ones are left alone, a timestamped backup is kept), then shows the newest lines of `wp-content/debug.log`. `--debug` does it without asking, `--no-debug` never offers. Errors become visible to visitors, so switch it off when you're done.
 
 Everything it does is logged to `/var/log/plugin-hunter/<domain>/<timestamp>.log` (with a `/tmp` fallback), and the path is printed when it finishes.
 
@@ -309,13 +326,15 @@ sudo ./fix-roundcube.sh
 
 **Turns anything into a download link.** You have a file on the server and someone needs it — a client, a colleague, another server. Instead of SFTP credentials, you give them a URL.
 
-Give it one thing (a file path, a directory, or a URL), then pick **how** to publish. Only the backends the box actually has are offered; if it has none, it says so and stops:
+Give it one thing (a file path, a directory, or a URL), then pick **how** to publish. Only the backends the box actually has are offered, in this order — and the **first available one is the default** (Enter picks it; `--default` takes it without the menu). If it has none, it says so and stops:
 
 | Method | What it does |
 | --- | --- |
 | **web root** | Classic copy into `/var/www/html`, served by the running web server. **Stays until you remove it.** Offered when a web server (or `/var/www/html`) is present. |
-| **php link** | A throwaway `php -S` on a **random free port**, serving **just that one file** behind a **random token path** — not the folder, not anything else. Offered when php-cli exists. |
-| **python link** | The same, with a small python server. Offered when `python3` exists. |
+| **python link** | A throwaway python server on a **random free port**, serving **just that one file** behind a **random token path** — not the folder, not anything else. Offered when `python3` exists. |
+| **php link** | The same, with `php -S`. Offered when php-cli exists. |
+
+Pick one directly with `--web`, `--python` or `--php` (or `--serve php|python`, `--webroot <dir>`).
 
 A directory is compressed first (`tar.gz` / `zip`); a URL is downloaded, then served from your server.
 
@@ -328,8 +347,9 @@ A directory is compressed first (`tar.gz` / `zip`); a URL is downloaded, then se
 ```bash
 sudo ./thing-to-link.sh
 # or answer every prompt up-front with flags:
-sudo ./thing-to-link.sh -i /root/backup.tar.gz --serve php -t 2h
-sudo ./thing-to-link.sh -i https://example.com/file.zip --serve python
+sudo ./thing-to-link.sh -i /root/backup.tar.gz --default        # first available backend
+sudo ./thing-to-link.sh -i /root/backup.tar.gz --php -t 2h
+sudo ./thing-to-link.sh -i https://example.com/file.zip --python
 sudo ./thing-to-link.sh -i /home/user/backups -c zip --webroot /var/www/html   # classic web-root copy
 ```
 

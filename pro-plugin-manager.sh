@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.7.2
+#   Version   : 1.8.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.7.2"
+VERSION="1.8.0"
 
 
 #############################################
@@ -65,6 +65,7 @@ ControlPanel=""
 OWNER=""
 GROUP=""
 WP_CMD=""
+START_DIR="$PWD"    # where the script was started (relative --from paths)
 DB_CLI="mysql"      # prefer the mariadb client when present (detect_db_client)
 
 # Prefer the mariadb client over the deprecated 'mysql' name when present.
@@ -83,7 +84,7 @@ DB_PREFIX=""
 # CLI flags (filled by the argument parser below)
 DOMAIN=""
 WP_PATH=""
-FEATURE=""          # woocommerce | elementor | search | blueguard
+FEATURE=""          # woocommerce | elementor | search | blueguard | plugins
 PLUGIN_ACTION=""    # repair | update | install | rollback
 REQ_VERSION=""      # version for --install
 ASSUME_YES=""       # auto-activate after install, auto-confirm rollback
@@ -92,6 +93,10 @@ SR_OLD=""           # search & replace: old value
 SR_NEW=""           # search & replace: new value
 SR_NEW_SET=""       # whether --new was given (an empty new value is valid)
 SR_MODE=""          # search & replace mode: count | apply
+PM_ACTION=""        # plugin manager (wp-cli): install | list | activate | deactivate | delete
+PM_SRC=""           # plugin manager: zip URL or local path for install
+PM_SLUG=""          # plugin manager: plugin slug for activate / deactivate / delete
+PM_UNINSTALL=""     # plugin manager: run the plugin's uninstall routine on delete
 
 
 #############################################
@@ -104,7 +109,9 @@ usage() {
 Usage: pro-plugin-manager.sh [options] [path]
 
 Menu-driven WordPress plugin operations: manage WooCommerce or Elementor,
-search & replace across the whole database, or install Blue Guard.
+search & replace across the whole database, install Blue Guard, or manage
+any plugin through wp-cli (install from a link or path, list, activate,
+deactivate, delete).
 Every option is optional; anything you omit is asked for interactively,
 so the script stays fully usable with no arguments at all.
 
@@ -118,6 +125,7 @@ Options:
   -e, --elementor         Manage the Elementor plugin.
   -s, --search-replace    Search & replace across the whole database.
   -g, --blue-guard        Install the latest Blue Guard.
+  -m, --plugins           Plugin manager (wp-cli) — any plugin, see below.
 
   Plugin action (with -w / -e):
   -r, --repair            Repair the current version.
@@ -134,6 +142,20 @@ Options:
       --dry-run           Count matches only, change nothing.
       --apply             Perform the replacement.
 
+  Plugin manager (with -m; each of these also implies -m). Everything runs
+  through wp-cli so WordPress loads normally and the plugin's own
+  activation / deactivation / uninstall hooks fire:
+      --from <url|path>   Install a plugin zip from a link or a local path.
+      --list              List the installed plugins.
+      --activate <slug>   Activate a plugin.
+      --deactivate <slug> Deactivate a plugin.
+      --delete <slug>     Delete a plugin (deactivated first; a copy is kept
+                          in old-<slug>/). Asks whether to run its uninstall.
+      --uninstall         With --delete: run the plugin's uninstall routine
+                          (removes its settings / tables) without asking.
+      -y also activates after install, overwrites an installed copy and
+      confirms the delete; --no-activate skips the activation.
+
   -h, --help              Show this help and exit.
 
 Examples:
@@ -142,6 +164,8 @@ Examples:
   pro-plugin-manager.sh -p /home/u/public_html -e --install --version 3.21.0
   pro-plugin-manager.sh -d site.ir -s --old http://old.ir --new https://new.ir --dry-run
   pro-plugin-manager.sh -d site.ir --blue-guard
+  pro-plugin-manager.sh -d site.ir --from https://example.com/plugin.zip -y
+  pro-plugin-manager.sh -d site.ir --deactivate hello-dolly
 EOF
 }
 
@@ -152,6 +176,14 @@ set_feature() {
         exit 1
     fi
     FEATURE="$1"
+}
+set_pmaction() {
+    if [ -n "$PM_ACTION" ] && [ "$PM_ACTION" != "$1" ]; then
+        echo -e "${RED}✘ Only one plugin-manager action may be given at a time.${NC}" >&2
+        exit 1
+    fi
+    PM_ACTION="$1"
+    set_feature plugins
 }
 set_paction() {
     if [ -n "$PLUGIN_ACTION" ] && [ "$PLUGIN_ACTION" != "$1" ]; then
@@ -172,6 +204,13 @@ while [ $# -gt 0 ]; do
         -e|--elementor)     set_feature elementor;   shift ;;
         -s|--search-replace) set_feature search;     shift ;;
         -g|--blue-guard)    set_feature blueguard;   shift ;;
+        -m|--plugins)       set_feature plugins;     shift ;;
+        --from)             [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; PM_SRC="$2"; set_pmaction install; shift 2 ;;
+        --list)             set_pmaction list;       shift ;;
+        --activate)         [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; PM_SLUG="$2"; set_pmaction activate;   shift 2 ;;
+        --deactivate)       [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; PM_SLUG="$2"; set_pmaction deactivate; shift 2 ;;
+        --delete)           [ -n "${2+x}" ] || { echo -e "${RED}✘ $1 requires a value.${NC}" >&2; exit 1; }; PM_SLUG="$2"; set_pmaction delete;     shift 2 ;;
+        --uninstall)        PM_UNINSTALL="yes";      shift ;;
         -r|--repair)        set_paction repair;      shift ;;
         -u|--update)        set_paction update;      shift ;;
         -i|--install)       set_paction install;     shift ;;
@@ -872,6 +911,181 @@ search_and_replace() {
 
 
 #############################################
+#  FEATURE: Plugin manager (wp-cli)
+#  Install from a link or path, list, activate, deactivate, delete — for
+#  ANY plugin. Everything goes through wp-cli on purpose: WordPress is
+#  loaded normally, so a plugin's activation / deactivation / uninstall
+#  hooks run exactly as they would from WP-Admin. Moving folders by hand
+#  skips those hooks and leaves the site in a state WordPress didn't make.
+#############################################
+
+# Ask for (or take from the flag) a plugin slug; prints it, empty on bad input.
+pm_ask_slug() {
+    local verb="$1" slug="$PM_SLUG"
+    if [[ -z "$slug" ]]; then
+        $WP_CMD plugin list --fields=name,status,version 2>/dev/null >&2
+        echo >&2
+        read -p "$(echo -e ${YELLOW}"Plugin slug to $verb: "${NC})" slug
+    fi
+    if [[ ! "$slug" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo -e "${RED}✘ Invalid plugin slug: '$slug'${NC}" >&2
+        return 1
+    fi
+    printf '%s' "$slug"
+}
+
+# Fix permissions / ownership of the plugin folders wp-cli just wrote (as root).
+pm_fix_perms() {
+    local marker="$1" d
+    while IFS= read -r d; do
+        [[ -n "$d" ]] || continue
+        find "$d" \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
+        [[ -n "$OWNER" ]] && chown -R "$OWNER:$GROUP" "$d" 2>/dev/null
+        echo -e "${GREEN}✔ Permissions applied:${NC} $d"
+    done < <(find wp-content/plugins -mindepth 1 -maxdepth 1 -type d -newer "$marker" 2>/dev/null)
+}
+
+pm_install() {
+    local src="$PM_SRC" act="" out marker
+    if [[ -z "$src" ]]; then
+        read -p "$(echo -e ${YELLOW}"Plugin zip — URL or local path: "${NC})" src
+    fi
+    if [[ -z "$src" ]]; then
+        echo -e "${RED}✘ Source cannot be empty.${NC}"; return 1
+    fi
+    if [[ ! "$src" =~ ^https?:// ]]; then
+        [[ "$src" = /* ]] || src="$START_DIR/$src"  # relative to where the script was started
+        [[ -f "$src" ]] || { echo -e "${RED}✘ File not found: $src${NC}"; return 1; }
+    fi
+
+    # Activate afterwards? --yes / --no-activate answer up-front.
+    local ACT_CONFIRM=""
+    if   [[ "$NO_ACTIVATE" == "yes" ]]; then ACT_CONFIRM="n"
+    elif [[ "$ASSUME_YES" == "yes" ]];  then ACT_CONFIRM="y"
+    else read -p "$(echo -e ${YELLOW}"Activate it after install? [y/N]: "${NC})" ACT_CONFIRM
+    fi
+    [[ "$ACT_CONFIRM" =~ ^[Yy]$ ]] && act="--activate"
+
+    marker=$(mktemp /tmp/ppm-mark.XXXXXX)
+    echo -e "${BLUE}↓ Installing from:${NC} $src"
+    out=$($WP_CMD plugin install "$src" $act 2>&1); echo "$out"
+
+    # Already there? Offer to overwrite (wp-cli's --force).
+    if grep -qiE 'already exists|already installed' <<<"$out"; then
+        local OW="n"
+        if [[ "$ASSUME_YES" == "yes" ]]; then OW="y"
+        else read -p "$(echo -e ${YELLOW}"That plugin is already installed. Overwrite it? [y/N]: "${NC})" OW
+        fi
+        if [[ "$OW" =~ ^[Yy]$ ]]; then
+            out=$($WP_CMD plugin install "$src" $act --force 2>&1); echo "$out"
+        else
+            echo -e "${BLUE}Left the installed copy as it is.${NC}"; rm -f "$marker"; return 0
+        fi
+    fi
+
+    if grep -qiE 'success' <<<"$out"; then
+        pm_fix_perms "$marker"
+        rm -f "$marker"
+        echo
+        echo -e "${GREEN}✔ Plugin installed${act:+ and activated}.${NC}"
+    else
+        rm -f "$marker"
+        echo -e "${RED}✘ Install failed — see the wp-cli output above.${NC}"; return 1
+    fi
+}
+
+pm_toggle() {   # $1 = activate | deactivate
+    local verb="$1" slug
+    slug=$(pm_ask_slug "$verb") || return 1
+    echo -e "${MAGENTA}Running: wp plugin $verb $slug${NC}"
+    if $WP_CMD plugin "$verb" "$slug" 2>&1; then
+        echo -e "${GREEN}✔ Done.${NC}"
+        $WP_CMD plugin status "$slug" 2>/dev/null || true
+    else
+        echo -e "${RED}✘ wp plugin $verb failed — see the output above.${NC}"; return 1
+    fi
+}
+
+pm_delete() {
+    local slug UN="" CONFIRM=""
+    slug=$(pm_ask_slug delete) || return 1
+    if ! $WP_CMD plugin is-installed "$slug" >/dev/null 2>&1; then
+        echo -e "${RED}✘ Plugin '$slug' is not installed.${NC}"; return 1
+    fi
+
+    if [[ "$ASSUME_YES" != "yes" ]]; then
+        read -p "$(echo -e ${YELLOW}"Delete plugin '$slug'? [y/N]: "${NC})" CONFIRM
+        [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
+    fi
+    if [[ "$PM_UNINSTALL" == "yes" ]]; then
+        UN="y"
+    else
+        read -p "$(echo -e ${YELLOW}"Also run its uninstall routine? It removes the plugin's settings/tables [y/N]: "${NC})" UN
+    fi
+
+    # Keep a copy of the files (same old-<slug>/ convention as the other features).
+    if [[ -d "wp-content/plugins/$slug" ]]; then
+        rm -rf "old-$slug"
+        cp -a "wp-content/plugins/$slug" "old-$slug" && chmod -R go-rwx "old-$slug" \
+            && echo -e "${BLUE}Copy of the plugin files kept in old-$slug/${NC}"
+    fi
+
+    if [[ "$UN" =~ ^[Yy]$ ]]; then
+        echo -e "${MAGENTA}Running: wp plugin uninstall $slug --deactivate${NC}"
+        $WP_CMD plugin uninstall "$slug" --deactivate 2>&1 \
+            || { echo -e "${RED}✘ Uninstall failed — see the output above.${NC}"; return 1; }
+    else
+        if $WP_CMD plugin is-active "$slug" >/dev/null 2>&1; then
+            echo -e "${MAGENTA}Running: wp plugin deactivate $slug${NC}"
+            $WP_CMD plugin deactivate "$slug" 2>&1
+        fi
+        echo -e "${MAGENTA}Running: wp plugin delete $slug${NC}"
+        $WP_CMD plugin delete "$slug" 2>&1 \
+            || { echo -e "${RED}✘ Delete failed — see the output above.${NC}"; return 1; }
+    fi
+    echo -e "${GREEN}✔ Plugin '$slug' removed.${NC}"
+}
+
+manage_plugins_wpcli() {
+    require_wordpress || return 1
+    detect_owner
+    resolve_wp_cli || { echo -e "${RED}✘ The plugin manager needs wp-cli and none could be found.${NC}"; return 1; }
+
+    local c=""
+    case "$PM_ACTION" in
+        install)    c=1 ;;
+        list)       c=2 ;;
+        activate)   c=3 ;;
+        deactivate) c=4 ;;
+        delete)     c=5 ;;
+        *)
+            echo
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}      Plugin Manager (wp-cli)          ${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo
+            echo -e "${YELLOW}1) Install from a link or path (.zip)${NC}"
+            echo -e "${YELLOW}2) List plugins${NC}"
+            echo -e "${YELLOW}3) Activate a plugin${NC}"
+            echo -e "${YELLOW}4) Deactivate a plugin${NC}"
+            echo -e "${YELLOW}5) Delete a plugin${NC}"
+            echo
+            read -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" c
+            ;;
+    esac
+
+    case "$c" in
+        1) pm_install ;;
+        2) $WP_CMD plugin list 2>&1 ;;
+        3) pm_toggle activate ;;
+        4) pm_toggle deactivate ;;
+        5) pm_delete ;;
+        *) echo -e "${RED}Invalid choice!${NC}"; return 1 ;;
+    esac
+}
+
+
+#############################################
 #  MENU + DISPATCH
 #############################################
 show_menu() {
@@ -884,6 +1098,7 @@ show_menu() {
     echo -e "${YELLOW}2) Elementor Manager${NC}"
     echo -e "${YELLOW}3) Search And Replace${NC}"
     echo -e "${YELLOW}4) Install latest Blue Guard${NC}"
+    echo -e "${YELLOW}5) Plugin Manager (wp-cli: install / list / activate / deactivate / delete)${NC}"
     echo
 }
 
@@ -897,12 +1112,13 @@ main() {
     local feat="$FEATURE"
     if [ -z "$feat" ]; then
         show_menu
-        read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" choice
+        read -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" choice
         case $choice in
             1) feat="woocommerce" ;;
             2) feat="elementor" ;;
             3) feat="search" ;;
             4) feat="blueguard" ;;
+            5) feat="plugins" ;;
             *) echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
         esac
     fi
@@ -912,6 +1128,7 @@ main() {
         elementor)   manage_elementor ;;
         search)      search_and_replace ;;
         blueguard)   install_blue_guard ;;
+        plugins)     manage_plugins_wpcli ;;
         *)           echo -e "${RED}Invalid choice!${NC}"; exit 1 ;;
     esac
 }
