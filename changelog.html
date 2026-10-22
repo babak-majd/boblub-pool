@@ -313,13 +313,31 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.13.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.0</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.6.0</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.3.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-10-22 ============ -->
+            <article class="entry" data-script="magic-move" data-date="2026-10-22">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.7.0</span><time datetime="2026-10-22">2026-10-22</time>
+                </div>
+                <ul class="en">
+                    <li>The source report now records the source's <strong>panel and version</strong> (only when a panel is actually detected), hostname, IP, SSH port and OS. Each pass replaces only its own section, so <code>report.txt</code> keeps SOURCE, TRANSFER and DESTINATION together; old reports are still read.</li>
+                    <li>On a <strong>cPanel destination</strong>, the destination pass offers to pull the accounts with <strong>cPanel&#39;s own Transfer Tool</strong> (WHM API 1) before verifying — also when the report doesn&#39;t know the source panel. Only the users in <code>migration.csv</code> go; root, staff and system users are filtered out.</li>
+                    <li>Every decision is asked one by one: existing account/domain → ignore / overwrite / overwrite with delete / restore under another name (+ database overwrite); reseller → same privileges / without them / plain account; a missing owner reseller → add it or let root own the account; dedicated IP, zone A records, Express/Live Transfer, skip home/DBs/bandwidth, packages + feature lists. The full plan is shown before anything is queued.</li>
+                    <li>The pull needs prepared servers: it offers to prep this destination and prints a ready-to-paste block for the <strong>source</strong> (which now opens root SSH there), then checks the SSH port. The root password goes on stdin, never on the command line. Results: <code>transfer-plan.csv</code>, <code>transfer-errors.log</code>. New flags <code>--transfer</code>, <code>--no-transfer</code>, <code>--src-ip</code>, <code>--src-port</code>.</li>
+                </ul>
+                <ul class="fa">
+                    <li>گزارش سورس حالا <strong>پنل و نسخهٔ آن</strong> (فقط وقتی واقعاً پنلی تشخیص داده شود)، hostname، IP، پورت SSH و سیستم‌عامل سورس را ثبت می‌کند. هر پاس فقط بخش خودش را جایگزین می‌کند، پس <code>report.txt</code> بخش‌های SOURCE، TRANSFER و DESTINATION را کنار هم نگه می‌دارد؛ گزارش‌های قدیمی هم همچنان خوانده می‌شوند.</li>
+                    <li>روی <strong>مقصد cPanel</strong>، پاس مقصد پیشنهاد می‌دهد اکانت‌ها پیش از بررسی با <strong>Transfer Tool خودِ cPanel</strong> (WHM API 1) کشیده شوند — حتی وقتی گزارش پنل سورس را نمی‌داند. فقط یوزرهای <code>migration.csv</code> می‌روند؛ root، staff و یوزرهای سیستمی حذف می‌شوند.</li>
+                    <li>هر تصمیم دونه‌دونه پرسیده می‌شود: اکانت/دامنهٔ موجود ← ignore / overwrite / overwrite with delete / ریستور با نام دیگر (+ بازنویسی دیتابیس)؛ ریسلر ← با همان privilegeها / بدون آن‌ها / اکانت معمولی؛ ریسلرِ مالکی که نیست ← اضافه‌اش کن یا مالک root شود؛ IP اختصاصی، رکوردهای A زون، Express/Live Transfer، رد کردن هوم/دیتابیس/پهنای باند، پکیج‌ها + feature listها. پیش از صف‌شدن هر چیزی، کل برنامه نمایش داده می‌شود.</li>
+                    <li>این انتقال سرورهای آماده لازم دارد: پیشنهاد می‌دهد همین مقصد prep شود و یک بلوک آمادهٔ paste برای <strong>سورس</strong> چاپ می‌کند (که حالا root SSH را آنجا باز می‌کند)، بعد پورت SSH را چک می‌کند. رمز root از stdin فرستاده می‌شود، هرگز روی خط فرمان. خروجی‌ها: <code>transfer-plan.csv</code>، <code>transfer-errors.log</code>. فلگ‌های جدید <code>--transfer</code>، <code>--no-transfer</code>، <code>--src-ip</code>، <code>--src-port</code>.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-10-21 ============ -->
             <article class="entry" data-script="wp-core" data-date="2026-10-21">
