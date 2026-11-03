@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.7.1
+#   Version   : 2.7.2
 # ════════════════════════════════════════════════════════════
-VERSION="2.7.1"
+VERSION="2.7.2"
 
 set -u
 
@@ -501,7 +501,10 @@ cpanel_rows() {
         if [ -z "$d" ] && [ -r "/var/cpanel/userdata/$user/main" ]; then
             d=$(awk -F':[[:space:]]*' '$1=="main_domain"{print $2; exit}' "/var/cpanel/userdata/$user/main")
         fi
-        [ -n "$d" ] && printf '%s\t%s\t%s\n' "${owner:-root}" "$user" "$d"
+        # Emit the row even with no domain: a domain-less account still has a home
+        # to sync and belongs in the list; the domain-specific steps (health check,
+        # snapshot, heal) skip an empty domain on their own.
+        printf '%s\t%s\t%s\n' "${owner:-root}" "$user" "$d"
     done
 }
 
@@ -511,13 +514,14 @@ directadmin_rows() {
     for dir in "$base"/*/; do
         [ -d "$dir" ] || continue
         user=$(basename "$dir")
-        owner=""; d=""
-        if [ -r "$dir/user.conf" ]; then
-            owner=$(awk -F= '$1=="creator"{print $2; exit}' "$dir/user.conf")
-            d=$(awk -F= '$1=="domain"{print $2; exit}' "$dir/user.conf")
-        fi
+        [ -r "$dir/user.conf" ] || continue      # only real accounts (have a user.conf)
+        owner=$(awk -F= '$1=="creator"{print $2; exit}' "$dir/user.conf")
+        d=$(awk -F= '$1=="domain"{print $2; exit}' "$dir/user.conf")
         [ -z "$d" ] && [ -r "$dir/domains.list" ] && d=$(awk 'NF{print; exit}' "$dir/domains.list")
-        [ -n "$d" ] && printf '%s\t%s\t%s\n' "${owner:-admin}" "$user" "$d"
+        # Emit the row even with no domain: a domain-less account still has a home
+        # to sync and belongs in the list; the domain-specific steps (health check,
+        # snapshot, heal) skip an empty domain on their own.
+        printf '%s\t%s\t%s\n' "${owner:-admin}" "$user" "$d"
     done
 }
 
@@ -613,6 +617,21 @@ filter_users() {      # $1 rows, $2 space/comma user list
     printf '%s\n' "$1" | awk -F'\t' -v list="$2" '
         BEGIN { n=split(list, a, /[ ,]+/); for (k=1;k<=n;k++) if (a[k]!="") want[a[k]]=1 }
         ($2 in want)'
+}
+# Warn (don't fail) when some typed names matched no account, so a selection is
+# never silently short. $1 = typed list (space/comma), $2 = matched rows.
+warn_unmatched_users() {
+    local typed="$1" rows="$2" u
+    declare -A have=() dmiss=()
+    local miss=()
+    while IFS= read -r u; do [ -n "$u" ] && have["$u"]=1; done < <(printf '%s\n' "$rows" | cut -f2)
+    for u in ${typed//,/ }; do
+        [ -n "$u" ] || continue
+        [ -n "${have[$u]:-}" ] && continue
+        [ -n "${dmiss[$u]:-}" ] && continue; dmiss[$u]=1
+        miss+=("$u")
+    done
+    [ "${#miss[@]}" -gt 0 ] && echo -e "${YELLOW}[WARN]${RESET} ${#miss[@]} typed name(s) matched no account and were skipped: ${miss[*]}"
 }
 filter_reseller() {   # $1 rows, $2 reseller name
     printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1==r'
@@ -884,6 +903,7 @@ select_accounts() {
         if [ -n "$USERS" ]; then
             ROWS=$(filter_users "$ROWS" "$USERS")
             [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; }
+            warn_unmatched_users "$USERS" "$ROWS"
         elif [ -n "$RESELLER" ]; then
             ROWS=$(filter_reseller "$ROWS" "$RESELLER")
             [ -n "$ROWS" ] || { error "No accounts found for reseller: $RESELLER"; exit 1; }
@@ -899,7 +919,8 @@ select_accounts() {
                 1) : ;;
                 2) read -r -e -p "Usernames (space/comma separated): " USERS
                    ROWS=$(filter_users "$ROWS" "$USERS")
-                   [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; } ;;
+                   [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; }
+                   warn_unmatched_users "$USERS" "$ROWS" ;;
                 3) echo -e "${CYAN}Resellers with accounts:${RESET}"
                    local reslist=() rline rnum rc rn ridx
                    mapfile -t reslist < <(printf '%s\n' "$ROWS" | cut -f1 | sort | uniq -c | awk '{print $1" "$2}')
@@ -2216,8 +2237,17 @@ run_source() {
 
     local owner user domain NS_CSV="" ns1
     while IFS=$'\t' read -r owner user domain; do
-        [ -z "$domain" ] && continue
+        [ -n "$user" ] || continue
         i=$((i+1))
+        NS_CSV=""
+        # A domain-less account still counts and is listed, but there is no site to
+        # look up NS for, health-check or snapshot — record it and move on.
+        if [ -z "$domain" ]; then
+            printf '[%3d/%3d] %-20s %s\n' "$i" "$total" "$user" "(no domain)"
+            echo "$user,,no domain" >> "$OUT_CSV"
+            log "SOURCE (user=$user) no domain — listed, no health check"
+            continue
+        fi
         # Looked up once per domain, then appended to whichever row is written
         # below; NS_CSV is empty when the feature is off, so no columns are added.
         [ "$NS_LOOKUP" = "yes" ] && lookup_ns "$domain"
@@ -2358,7 +2388,7 @@ run_destination() {
     case "$csv_header" in user,domain,*) ;; *) csv_header="user,domain,status_before,status_after" ;; esac
     while IFS=, read -r user domain sbefore _safter extra; do
         user="${user//[[:space:]]/}"; domain="${domain//[[:space:]]/}"
-        [ -z "$domain" ] && continue
+        [ -z "$user" ] && continue                # need a user; a domain-less row stays
         [ "$user" = "user" ] && continue          # header
         case "$user" in \#*) continue ;; esac
         U+=("$user"); D+=("$domain"); SB+=("$sbefore"); EX+=("$extra")
@@ -2390,6 +2420,14 @@ run_destination() {
     for ((idx=0; idx<total; idx++)); do
         user="${U[$idx]}"; domain="${D[$idx]}"; before_status="${SB[$idx]}"; extra="${EX[$idx]}"
         i=$((i+1))
+        # A domain-less account has no site to check or heal — carry it through to
+        # the verified CSV unchanged and move on, so it is never silently dropped.
+        if [ -z "$domain" ]; then
+            printf '[%3d/%3d] %-35s -> %b%s%b\n' "$i" "$total" "(no domain: $user)" "$YELLOW" "no domain (skipped)" "$RESET"
+            echo "$user,,$before_status,no domain${extra:+,$extra}" >> "$out_tmp"
+            log "DEST (user=$user) no domain — carried through, not healed"
+            continue
+        fi
         snap=$(snap_path after "$domain")
         DISABLED_PLUGINS=""          # reset per account so counts never carry over
         printf '[%3d/%3d] %-35s' "$i" "$total" "$domain"

@@ -313,13 +313,27 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.1</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.14.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.1</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.1</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.2</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.4.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-11-04 ============ -->
+            <article class="entry" data-script="magic-move" data-date="2026-11-04">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.7.2</span><time datetime="2026-11-04">2026-11-04</time>
+                </div>
+                <ul class="en">
+                    <li><strong>Domain-less accounts are no longer silently dropped.</strong> An account that has no detectable main domain (no <code>domain=</code> and an empty <code>domains.list</code> on DirectAdmin, or no <code>DNS</code>/main domain on cPanel) used to be left out of the account list entirely — so it was miscounted (e.g. 288 selected shown as 287) and, worse, its home directory was never rsynced. Such accounts are now included everywhere: counted, listed, synced, and carried through the source and destination passes. The domain-specific steps (health check, page snapshot, PHP heal) simply skip an empty domain and mark the row <code>no domain</code>.</li>
+                    <li>When you pick <strong>specific users</strong>, any typed name that matches no account is now reported explicitly (<code>[WARN] N typed name(s) matched no account and were skipped: …</code>) instead of quietly shrinking the count.</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>حساب‌های بدونِ دامنه دیگر ساکت حذف نمی‌شوند.</strong> حسابی که دامنهٔ اصلیِ قابل‌تشخیص ندارد (در DirectAdmin نه <code>domain=</code> و نه <code>domains.list</code>، یا در cPanel نه <code>DNS</code>/دامنهٔ اصلی) قبلاً کلاً از لیست می‌افتاد — پس اشتباه شمرده می‌شد (مثلاً ۲۸۸ انتخاب‌شده، ۲۸۷ نمایش داده می‌شد) و بدتر، هوم‌دایرکتوری‌اش هیچ‌وقت rsync نمی‌شد. حالا این حساب‌ها همه‌جا شامل می‌شوند: شمرده، لیست، sync و در پاس‌های سورس و مقصد عبور داده می‌شوند. مرحله‌های وابسته به دامنه (health check، snapshot، ترمیم PHP) برای دامنهٔ خالی فقط skip می‌کنند و ردیف را <code>no domain</code> علامت می‌زنند.</li>
+                    <li>وقتی <strong>specific users</strong> را انتخاب می‌کنی، هر نامِ تایپ‌شده‌ای که با هیچ حسابی مطابقت نکند حالا صریح گزارش می‌شود (<code>[WARN] N typed name(s) matched no account and were skipped: …</code>) به‌جای اینکه ساکت شمارش را کم کند.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-11-03 ============ -->
             <article class="entry" data-script="plugin-hunter" data-date="2026-11-03">
