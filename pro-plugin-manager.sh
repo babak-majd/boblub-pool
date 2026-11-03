@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.8.1
+#   Version   : 1.9.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.8.1"
+VERSION="1.9.0"
 
 
 #############################################
@@ -51,6 +51,7 @@ start_log() {
     _LOG_TEE_PID=$!
 }
 finish_log() {
+    [ -n "${PPM_PROBE:-}" ] && rm -f "$PPM_PROBE" 2>/dev/null   # never leave a PHP probe in the webroot
     [ -n "$LOG_FILE" ] || return 0
     exec >&- 2>&-                   # close the redirected FDs so tee sees EOF
     [ -n "$_LOG_TEE_PID" ] && wait "$_LOG_TEE_PID" 2>/dev/null
@@ -65,6 +66,7 @@ ControlPanel=""
 OWNER=""
 GROUP=""
 WP_CMD=""
+PPM_PROBE=""        # path of the live-PHP probe while it exists in the webroot (removed ASAP)
 START_DIR="$PWD"    # where the script was started (relative --from paths)
 DB_CLI="mysql"      # prefer the mariadb client when present (detect_db_client)
 
@@ -386,67 +388,98 @@ parse_wp_config() {
     return 0
 }
 
-# Find a usable wp-cli command for the current webroot and store it in $WP_CMD.
-# Returns 0 if found, 1 otherwise.
+# Fetch a URL with whatever is available (curl preferred, wget fallback).
+_fetch_url() {   # $1 = url -> body on stdout
+    if command -v curl >/dev/null 2>&1; then curl -fsSk --max-time 15 "$1" 2>/dev/null
+    else wget -q -T 15 --no-check-certificate -O - "$1" 2>/dev/null; fi
+}
+
+# Ask the LIVE site which PHP it actually runs under, then echo the CLI php of
+# that SAME version. wp-cli bootstraps WordPress (and here loads the plugin), so
+# running it under a different PHP version than the site uses can throw spurious
+# fatals. A one-line probe is dropped into the webroot, fetched over the domain,
+# and removed the instant the fetch returns (read or not). Needs $DOMAIN.
+detect_site_php() {
+    local webroot="$WEBROOT" tok probe body ver bin mm cand url=""
+    [ -n "$DOMAIN" ] && url="https://${DOMAIN}/"
+    [ -n "$url" ] && [ -d "$webroot" ] || return 1
+    tok="ppm-php-$$-$RANDOM"; probe="$webroot/${tok}.php"
+    PPM_PROBE="$probe"
+    printf '%s' '<?php echo "MMPHP|".PHP_VERSION."|".PHP_BINARY."|".PHP_SAPI;' > "$probe" 2>/dev/null \
+        || { rm -f "$probe" 2>/dev/null; PPM_PROBE=""; return 1; }
+    chmod 644 "$probe" 2>/dev/null
+    chown --reference="$webroot" "$probe" 2>/dev/null
+    body=$(_fetch_url "${url}${tok}.php")
+    case "$body" in *MMPHP\|*) ;; *) body=$(_fetch_url "http://${DOMAIN}/${tok}.php") ;; esac
+    rm -f "$probe" 2>/dev/null; PPM_PROBE=""
+    case "$body" in *MMPHP\|*) ;; *) return 1 ;; esac
+    body="${body#*MMPHP|}"; ver="${body%%|*}"; body="${body#*|}"; bin="${body%%|*}"
+    [ -n "$ver" ] || return 1
+    mm="${ver%.*}"; mm="${mm/./}"                       # 8.1.29 -> 81
+    for cand in \
+        "${bin:+$(dirname "$bin")/php}" \
+        "/opt/alt/php${mm}/usr/bin/php" \
+        "/opt/cpanel/ea-php${mm}/root/usr/bin/php" \
+        "/usr/local/php${mm}/bin/php" \
+        "/usr/local/bin/ea-php${mm}"; do
+        [ -n "$cand" ] && [ -x "$cand" ] || continue
+        "$cand" -v 2>/dev/null | grep -q "PHP ${ver%.*}\." && { printf '%s' "$cand"; return 0; }
+    done
+    return 1
+}
+
+# A sane CLI php when the probe could not name the site's version.
+fallback_php() {
+    local p
+    for p in /usr/local/bin/php "$(command -v php 2>/dev/null)" /opt/cpanel/ea-php*/root/usr/bin/php; do
+        [ -n "$p" ] && [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+    done
+    return 1
+}
+
+# Find a wp-cli PHAR (system wp, DirectAdmin cache, or a downloaded portable copy)
+# and store a command in $WP_CMD that runs it UNDER THE SITE'S PHP. Running the
+# phar through php also means a noexec /tmp (common on cPanel/DirectAdmin) no
+# longer blocks the downloaded copy. Returns 0 if found, 1 otherwise.
 resolve_wp_cli() {
     WP_CMD=""
+    local php phar p
+    php=$(detect_site_php) || php=$(fallback_php) || php=""
 
-    # 1) System wp
-    if command -v wp >/dev/null 2>&1; then
-        local cmd="$(command -v wp) --allow-root"
-        if $cmd core version >/dev/null 2>&1; then
-            WP_CMD="$cmd"
-            echo -e "${GREEN}✔ Using system wp${NC}"
-            return 0
-        fi
+    phar=""
+    if command -v wp >/dev/null 2>&1; then phar="$(command -v wp)"; fi
+    [[ -z "$phar" && -f /usr/local/bin/wp ]] && phar="/usr/local/bin/wp"
+    if [[ -z "$phar" ]]; then
+        for p in /usr/local/directadmin/custombuild/cache/wp-cli-*.phar; do [[ -f "$p" ]] && { phar="$p"; break; }; done
     fi
-
-    # 2) Portable wp binary (downloaded to /tmp)
-    echo -e "${MAGENTA}Downloading portable wp binary to /tmp...${NC}"
-    local zip="/tmp/wp.zip"
-    local wpcli="/tmp/wp"
-    rm -f "$zip" "$wpcli" 2>/dev/null
-
-    if wget -q -O "$zip" "http://dl.iswps.ir/cli/wp.zip"; then
-        if unzip -j -o "$zip" 'wp' -d /tmp >/dev/null 2>&1 || unzip -j -o "$zip" '*wp' -d /tmp >/dev/null 2>&1; then
-            if [[ -f "$wpcli" ]]; then
-                chmod +x "$wpcli"
-                local cmd="$wpcli --allow-root"
-                if $cmd core version >/dev/null 2>&1; then
-                    WP_CMD="$cmd"
-                    echo -e "${GREEN}✔ Using portable wp${NC}"
-                    return 0
-                fi
-            fi
+    if [[ -z "$phar" ]]; then
+        echo -e "${MAGENTA}Downloading portable wp binary to /tmp...${NC}"
+        local zip="/tmp/wp.zip"; rm -f "$zip" /tmp/wp 2>/dev/null
+        if wget -q -O "$zip" "http://dl.iswps.ir/cli/wp.zip" \
+           && { unzip -j -o "$zip" 'wp' -d /tmp >/dev/null 2>&1 || unzip -j -o "$zip" '*wp' -d /tmp >/dev/null 2>&1; } \
+           && [[ -f /tmp/wp ]]; then
+            chmod +x /tmp/wp 2>/dev/null; phar="/tmp/wp"
         fi
+        rm -f "$zip" 2>/dev/null
     fi
-    rm -f "$zip" 2>/dev/null
+    [[ -n "$phar" ]] || { echo -e "${YELLOW}⚠ No usable wp-cli found.${NC}"; return 1; }
 
-    # 3) Control-panel specific paths
-    if [[ "$ControlPanel" = "DirectAdmin" ]]; then
-        local da_phar="/usr/local/directadmin/custombuild/cache/wp-cli-2.12.0.phar"
-        if [[ -x "/usr/local/php81/bin/php" && -f "$da_phar" ]]; then
-            local cmd="/usr/local/php81/bin/php $da_phar --allow-root"
-            if $cmd core version >/dev/null 2>&1; then
-                WP_CMD="$cmd"
-                echo -e "${GREEN}✔ Using DirectAdmin wp-cli phar${NC}"
-                return 0
-            fi
-        fi
+    # Prefer the site's php on the phar; then the phar's own shebang; then bare wp.
+    if [[ -n "$php" ]] && $php "$phar" --allow-root core version >/dev/null 2>&1; then
+        WP_CMD="$php $phar --allow-root"
+        echo -e "${GREEN}✔ Using wp-cli under the site's PHP ($php)${NC}"
+        return 0
     fi
-
-    if [[ "$ControlPanel" = "Cpanel" ]]; then
-        local cp_wp="/usr/local/bin/wp"
-        if [[ -x "$cp_wp" ]]; then
-            local cmd="$cp_wp --allow-root"
-            if $cmd core version >/dev/null 2>&1; then
-                WP_CMD="$cmd"
-                echo -e "${GREEN}✔ Using cPanel wp binary${NC}"
-                return 0
-            fi
-        fi
+    if [[ -x "$phar" ]] && "$phar" --allow-root core version >/dev/null 2>&1; then
+        WP_CMD="$phar --allow-root"
+        echo -e "${GREEN}✔ Using wp-cli ($phar)${NC}"
+        return 0
     fi
-
+    if command -v wp >/dev/null 2>&1 && wp --allow-root core version >/dev/null 2>&1; then
+        WP_CMD="$(command -v wp) --allow-root"
+        echo -e "${GREEN}✔ Using system wp${NC}"
+        return 0
+    fi
     echo -e "${YELLOW}⚠ No usable wp-cli found.${NC}"
     return 1
 }

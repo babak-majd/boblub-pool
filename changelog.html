@@ -310,8 +310,8 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.1</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.14.0</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.9.0</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.15.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.1</span></button>
             <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.3</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
@@ -322,6 +322,30 @@
         <div class="entries" id="entries">
 
             <!-- ============ 2026-11-04 ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-11-04">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.15.0</span><time datetime="2026-11-04">2026-11-04</time>
+                </div>
+                <ul class="en">
+                    <li><strong>wp-cli now runs under the site's real PHP version.</strong> Before using wp-cli, the script drops a one-line probe into the webroot, fetches it over the domain to read the exact <code>PHP_VERSION</code>/<code>PHP_BINARY</code> the site runs under (it is plain PHP, so it answers even when WordPress is broken), then runs the wp-cli phar with the matching CLI (CloudLinux <code>/opt/alt/phpNN</code>, cPanel EA-PHP, or DirectAdmin). Running wp-cli under the wrong PHP version could make it bootstrap WordPress and throw a <em>spurious</em> critical error. The probe is removed the instant the fetch returns — read or not — and also on Ctrl+C, so no PHP file is ever left in the webroot.</li>
+                    <li><strong>The downloaded portable wp-cli is run via <code>php</code>, not executed directly.</strong> On servers where <code>/tmp</code> is mounted <code>noexec</code> (common on cPanel/DirectAdmin) the old <code>chmod +x /tmp/wp; /tmp/wp …</code> failed with "Permission denied"; invoking <code>php /tmp/wp …</code> sidesteps noexec entirely.</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>wp-cli حالا با نسخهٔ واقعیِ PHPِ خودِ سایت اجرا می‌شود.</strong> پیش از استفاده از wp-cli، یک پروبِ تک‌خطی در webroot گذاشته و با دامنه صدا زده می‌شود تا دقیقاً <code>PHP_VERSION</code>/<code>PHP_BINARY</code>ای که سایت با آن اجرا می‌شود خوانده شود (چون PHP خام است، حتی وقتی وردپرس خراب است هم جواب می‌دهد)، بعد phar‌ی wp-cli با CLIِ همان نسخه اجرا می‌شود (CloudLinux <code>/opt/alt/phpNN</code>، cPanel EA-PHP یا DirectAdmin). اجرای wp-cli با نسخهٔ اشتباهِ PHP می‌توانست باعث شود وردپرس را بوت کند و یک «خطای مهمِ» الکی بدهد. پروب درست لحظه‌ای که fetch برمی‌گردد — خوانده‌شده یا نه — و همچنین روی Ctrl+C پاک می‌شود، پس هیچ فایلِ PHP در webroot جا نمی‌ماند.</li>
+                    <li><strong>نسخهٔ دانلودیِ wp-cli به‌جای اجرای مستقیم، با <code>php</code> اجرا می‌شود.</strong> روی سرورهایی که <code>/tmp</code> با <code>noexec</code> مانت شده (رایج در cPanel/DirectAdmin)، روشِ قدیمی (<code>chmod +x /tmp/wp; /tmp/wp …</code>) با «Permission denied» می‌خورد؛ اجرای <code>php /tmp/wp …</code> کلاً noexec را دور می‌زند.</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-11-04">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.9.0</span><time datetime="2026-11-04">2026-11-04</time>
+                </div>
+                <ul class="en">
+                    <li><strong>Same wp-cli fix as plugin-hunter.</strong> The plugin manager loads real plugins through wp-cli, so running it under the wrong PHP version is exactly when a spurious critical error appears. It now probes the site for its live PHP version and runs the wp-cli phar under that CLI, and runs the downloaded portable copy via <code>php</code> so a <code>noexec</code> <code>/tmp</code> no longer breaks it. The probe is always removed (after the fetch and on exit).</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>همان فیکسِ wp-cliِ plugin-hunter.</strong> مدیر افزونه، افزونه‌ها را واقعاً از طریق wp-cli بارگذاری می‌کند، پس اجرا با نسخهٔ اشتباهِ PHP دقیقاً همان‌جایی است که خطای مهمِ الکی ظاهر می‌شود. حالا نسخهٔ زندهٔ PHPِ سایت را پروب می‌کند و phar‌ی wp-cli را با CLIِ همان نسخه اجرا می‌کند، و نسخهٔ دانلودی را با <code>php</code> اجرا می‌کند تا <code>noexec</code> بودنِ <code>/tmp</code> دیگر خرابش نکند. پروب همیشه پاک می‌شود (بعد از fetch و هنگام خروج).</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="magic-move" data-date="2026-11-04">
                 <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.7.3</span><time datetime="2026-11-04">2026-11-04</time>
                 </div>

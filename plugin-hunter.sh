@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.14.0
+#   Version   : 1.15.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.14.0"
+VERSION="1.15.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -375,6 +375,7 @@ cancel_scan(){
     trap '' INT TERM                # a second Ctrl+C must not interrupt the restore
     echo
     info "Cancelling scan — restoring all plugins to their original state..."
+    [ -n "${PH_PROBE:-}" ] && rm -f "$PH_PROBE" 2>/dev/null   # never leave a PHP probe in the webroot
     debug_restore_off               # put wp-config (debugging) back as we found it
     restore_all
     success "All plugins restored. Scan cancelled."
@@ -406,30 +407,91 @@ cancel_hint(){
 #     file removed (it would also expire on its own after 6h).
 WP_CLI=()
 ADMIN_UID=""; ADMIN_TOKEN=""; ADMIN_CURLCFG=""
+PH_PROBE=""     # path of the live-PHP probe while it exists in the webroot (removed ASAP)
 
-# Find a working wp-cli (system, cPanel, DirectAdmin phar, or a portable copy).
+# Ask the LIVE site which PHP it actually runs under, then return the CLI php of
+# that SAME version — so wp-cli runs under the version the site uses, not whatever
+# `php` happens to be first in PATH. Running wp-cli under the wrong version makes
+# it bootstrap WordPress under that version and throw spurious fatals. A one-line
+# probe is dropped into the webroot, fetched over the domain (it is plain PHP, so
+# it answers even when WordPress itself is broken), then removed.
+detect_site_php() {
+    local webroot="$WP_DIR" url="${CHECK_URL:-}" tok probe body ver bin mm cand
+    [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
+    [ -n "$url" ] && [ -d "$webroot" ] || return 1
+    url="${url%/}/"
+    tok="mm-php-$$-$RANDOM"
+    probe="$webroot/${tok}.php"
+    # Track it globally FIRST so the cancel handler can wipe it even if we are
+    # interrupted mid-request — a stray PHP file in the webroot is a security risk.
+    PH_PROBE="$probe"
+    printf '%s' '<?php echo "MMPHP|".PHP_VERSION."|".PHP_BINARY."|".PHP_SAPI;' > "$probe" 2>/dev/null \
+        || { rm -f "$probe" 2>/dev/null; PH_PROBE=""; return 1; }
+    chmod 644 "$probe" 2>/dev/null
+    chown --reference="$webroot" "$probe" 2>/dev/null
+    body=$(curl -fsSk --max-time 15 "${url}${tok}.php" 2>/dev/null)
+    case "$body" in *MMPHP\|*) ;; *) [ -n "$DOMAIN" ] && body=$(curl -fsSk --max-time 15 "http://${DOMAIN}/${tok}.php" 2>/dev/null) ;; esac
+    rm -f "$probe" 2>/dev/null; PH_PROBE=""     # remove it the instant the fetch is done, read or not
+    case "$body" in *MMPHP\|*) ;; *) return 1 ;; esac
+    body="${body#*MMPHP|}"
+    ver="${body%%|*}"; body="${body#*|}"; bin="${body%%|*}"
+    [ -n "$ver" ] || return 1
+    mm="${ver%.*}"; mm="${mm/./}"                       # 8.1.29 -> 81
+    for cand in \
+        "${bin:+$(dirname "$bin")/php}" \
+        "/opt/alt/php${mm}/usr/bin/php" \
+        "/opt/cpanel/ea-php${mm}/root/usr/bin/php" \
+        "/usr/local/php${mm}/bin/php" \
+        "/usr/local/bin/ea-php${mm}"; do
+        [ -n "$cand" ] && [ -x "$cand" ] || continue
+        "$cand" -v 2>/dev/null | grep -q "PHP ${ver%.*}\." && { printf '%s' "$cand"; return 0; }
+    done
+    return 1
+}
+
+# A sane CLI php when the probe could not name the site's version.
+fallback_php() {
+    local p
+    for p in /usr/local/bin/php "$(command -v php 2>/dev/null)" /opt/cpanel/ea-php*/root/usr/bin/php; do
+        [ -n "$p" ] && [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+    done
+    return 1
+}
+
+# Find a wp-cli PHAR (system wp, DirectAdmin cache, or a downloaded portable copy)
+# and run it with the SITE's php. Running the phar through php means a noexec /tmp
+# (common on cPanel/DirectAdmin) no longer blocks the downloaded copy.
 find_wp_cli() {
     [ "${#WP_CLI[@]}" -gt 0 ] && return 0
-    local c phar php
     local -a opts=(--allow-root "--path=$WP_DIR" --skip-plugins --skip-themes)
+    local php phar c
+    php=$(detect_site_php) || php=$(fallback_php) || php=""
     for c in "$(command -v wp 2>/dev/null)" /usr/local/bin/wp /tmp/wp; do
-        [ -n "$c" ] && [ -x "$c" ] || continue
-        "$c" "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=("$c" "${opts[@]}"); return 0; }
+        [ -n "$c" ] && [ -f "$c" ] && { phar="$c"; break; }
     done
-    for phar in /usr/local/directadmin/custombuild/cache/wp-cli-*.phar; do
-        [ -f "$phar" ] || continue
-        for php in /usr/local/php*/bin/php "$(command -v php 2>/dev/null)"; do
-            [ -n "$php" ] && [ -x "$php" ] || continue
-            "$php" "$phar" "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=("$php" "$phar" "${opts[@]}"); return 0; }
+    if [ -z "${phar:-}" ]; then
+        for c in /usr/local/directadmin/custombuild/cache/wp-cli-*.phar; do
+            [ -f "$c" ] && { phar="$c"; break; }
         done
-    done
-    info "Downloading portable wp-cli to /tmp..."
-    if wget -q -O /tmp/wp.zip "http://dl.iswps.ir/cli/wp.zip" \
-       && unzip -j -o /tmp/wp.zip 'wp' -d /tmp >/dev/null 2>&1; then
-        chmod +x /tmp/wp
-        /tmp/wp "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=(/tmp/wp "${opts[@]}"); rm -f /tmp/wp.zip; return 0; }
     fi
-    rm -f /tmp/wp.zip
+    if [ -z "${phar:-}" ]; then
+        info "Downloading portable wp-cli to /tmp..."
+        if wget -q -O /tmp/wp.zip "http://dl.iswps.ir/cli/wp.zip" \
+           && unzip -j -o /tmp/wp.zip 'wp' -d /tmp >/dev/null 2>&1; then
+            chmod +x /tmp/wp 2>/dev/null; phar="/tmp/wp"
+        fi
+        rm -f /tmp/wp.zip
+    fi
+    [ -n "${phar:-}" ] || return 1
+    # Prefer the site's php on the phar; then the phar's own shebang; then bare wp.
+    if [ -n "$php" ] && "$php" "$phar" "${opts[@]}" core version >/dev/null 2>&1; then
+        WP_CLI=("$php" "$phar" "${opts[@]}"); return 0
+    fi
+    if [ -x "$phar" ] && "$phar" "${opts[@]}" core version >/dev/null 2>&1; then
+        WP_CLI=("$phar" "${opts[@]}"); return 0
+    fi
+    c="$(command -v wp 2>/dev/null)"
+    [ -n "$c" ] && "$c" "${opts[@]}" core version >/dev/null 2>&1 && { WP_CLI=("$c" "${opts[@]}"); return 0; }
     return 1
 }
 
