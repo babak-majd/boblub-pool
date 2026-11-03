@@ -1344,7 +1344,7 @@ echo -e "${YELLOW}3) Install the security patch for this version${WP_VERSION:+ (
 echo -e "${YELLOW}4) Install custom version${NC}"
 echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo -e "${YELLOW}6) Manage administrator users${NC}"
-echo -e "${YELLOW}7) Safe upgrade to the newest version your PHP supports (Persian site)${NC}"
+echo -e "${YELLOW}7) Safe upgrade (PHP-matched, Persian)${NC}"
 echo
 
 read -e -p "$(echo -e ${GREEN}"Enter choice [1-7]: "${NC})" choice

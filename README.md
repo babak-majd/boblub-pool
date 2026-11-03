@@ -76,7 +76,7 @@ Every script prints its version in its terminal header. Full per-script release 
 | **4** | Install custom version | You type the version (e.g. `6.8.3`) and it installs exactly that. |
 | **5** | Rollback to previous core | Restores the core that was replaced last time, from `old-core/`. Your undo button. |
 | **6** | Manage administrator users | Opens the admin submenu below. |
-| **7** | Safe upgrade to the newest version your PHP supports (Persian site) | Starts at the **latest secure** release and steps **down** version by version until it reaches the newest one the server's PHP actually supports, installs it, and makes the site **Persian**. See below. |
+| **7** | Safe upgrade (PHP-matched, Persian) | Starts at the **latest secure** release and steps **down** version by version until it reaches the newest one the server's PHP actually supports, installs it, and makes the site **Persian**. See below. |
 
 Options 1–4 all copy the current core into **`old-core/`** first, so option 5 can always bring it back.
 
