@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.7.2
+#   Version   : 2.7.3
 # ════════════════════════════════════════════════════════════
-VERSION="2.7.2"
+VERSION="2.7.3"
 
 set -u
 
@@ -1232,11 +1232,19 @@ print_destination_block() {   # $1 = source IP   $2 = wait for Enter? (yes|no)
 
 print_prep_block() {   # $1 = role that runs it   $2 = this server's IP   $3 = wait for Enter? (yes|no)
     local role="$1" myip="$2" wait="$3" block="$OUT_DIR/$1-prep.sh"
+    local remote="/root/magic-move-$role-prep.sh"
     write_prep_block "$role" "$myip" "$block"
     echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
-    echo -e "  ${YELLOW}Run this on the ${role^^}${RESET} (paste the whole block there, press Enter):"
+    echo -e "  ${YELLOW}Run this on the ${role^^}${RESET} — paste the whole block below (it writes the"
+    echo -e "  script and runs it in one go), then press Enter:"
     echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
+    # Wrapped as a single paste-and-run heredoc: the quoted MAGIC_MOVE_EOF
+    # delimiter keeps every $var / $(...) inside literal so they run on the OTHER
+    # server, not here. It writes the prep to a file there (re-runnable) and runs it.
+    printf "cat > %s <<'MAGIC_MOVE_EOF'\n" "$remote"
     cat "$block"
+    printf 'MAGIC_MOVE_EOF\n'
+    printf 'bash %s\n' "$remote"
     echo -e "${CYAN}────────────────────────────────────────────────${RESET}"
     echo -e "  Also saved for scp: ${YELLOW}$block${RESET}"
     if [ "$wait" = "yes" ] && [ -t 0 ]; then
