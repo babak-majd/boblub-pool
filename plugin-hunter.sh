@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.13.0
+#   Version   : 1.14.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.13.0"
+VERSION="1.14.0"
 
 # ---------- Colors ----------
 RED="\e[31m"
@@ -98,17 +98,21 @@ Options:
       --slow <sec>        A page slower than this counts as broken (default 10).
       --timeout <sec>     A page that takes longer than this has timed out
                           (default 30).
-      --debug             If the hunt cannot fix the site, turn WP_DEBUG on
-                          without asking (see below).
-      --no-debug          Never offer to turn WP_DEBUG on.
+      --debug             Keep WordPress debugging ON at the end without asking,
+                          even when the hunt could not fix the site (see below).
+      --no-debug          Never touch wp-config.php — leave WP_DEBUG as it is.
   -h, --help              Show this help and exit.
 
-Before the full hunt, a FAST PATH tries to skip it entirely: it reads the plugin
-that fatally errored straight from WordPress (the shown error, an existing
-wp-content/debug.log, or by briefly turning on WP_DEBUG_LOG), disables just that
-plugin, and re-checks — looping for further culprits. If that fixes the site the
-long search is skipped; if not, anything it touched is undone and the normal hunt
-runs exactly as before.
+First of all (unless --no-debug) WordPress debugging is switched on — WP_DEBUG,
+WP_DEBUG_LOG and WP_DEBUG_DISPLAY — in wp-config.php (a timestamped backup is
+kept), so the real PHP error is written to the page and to wp-content/debug.log
+straight away.
+
+Then a FAST PATH tries to skip the full hunt entirely: it reads the plugin that
+fatally errored straight from WordPress (the shown error or the debug log),
+disables just that plugin, and re-checks — looping for further culprits. If that
+fixes the site the long search is skipped; if not, anything it touched is undone
+and the normal hunt runs exactly as before.
 
 Automate mode checks the ONE page you choose and counts it as broken on: a
 timeout, a slow load (re-tested once first, so a cold cache isn't blamed), a
@@ -125,9 +129,10 @@ when the script ends. An admin page also fails when the login is bounced back
 to wp-login.php or the admin screen doesn't render.
 
 If the hunt CANNOT fix the site (no plugin culprit, or the fault is not a plugin
-at all), it offers to turn WordPress debugging on: WP_DEBUG, WP_DEBUG_LOG and
-WP_DEBUG_DISPLAY are each checked and switched on in wp-config.php (a timestamped
-backup is kept), so the real error shows on the page and in wp-content/debug.log.
+at all), the real error — already visible because debugging was turned on at the
+start — is printed from wp-content/debug.log, and you are asked whether to keep
+debugging on so you can keep reading it or turn it back off. When the site IS
+fixed, debugging is turned back off automatically (wp-config.php restored).
 
 Examples:
   plugin-hunter.sh
@@ -148,7 +153,9 @@ MODE=""
 STRATEGY=""
 AUTO_ACCEPT=""
 FAST="yes"                 # try the debug-log fast path before the full hunt
-DEBUG_OFFER=""             # unresolved hunt: ""=ask, yes=turn WP_DEBUG on, no=never
+DEBUG_OFFER=""             # ""=on up front + ask at the end if unresolved, yes=keep on without asking, no=never touch wp-config
+PH_DEBUG_BAK=""            # wp-config backup taken when WE turned debugging on at the start
+PH_DEBUG_ON=""             # set once we have actually switched a debug constant on
 CHECK_TARGET=""            # automate: front | admin | <path|url> (--check, or asked)
 ADMIN_USER=""              # --admin-user: admin to log in as (default: first admin)
 SLOW_LIMIT=10              # seconds: slower than this = broken
@@ -214,7 +221,7 @@ print_header
 resolve_webroot() {
     local USER U MAINDOMAIN CONF CONF_DOMAIN DOCROOT
     if [ -z "$DOMAIN" ]; then
-        read -r -p "Enter domain (or press Enter to use the current directory): " DOMAIN
+        read -r -e -p "Enter domain (or press Enter to use the current directory): " DOMAIN
     fi
 
     if [ -z "$DOMAIN" ]; then
@@ -282,7 +289,6 @@ fi
 PLUGINS="$WP_DIR/wp-content/plugins"
 PLUGINS_OFF="$WP_DIR/wp-content/plugins.off"
 DEBUG_LOG="$WP_DIR/wp-content/debug.log"   # WordPress writes fatals here (fast path)
-PH_EDITED_CFG=""                           # wp-config the fast path is editing, if any
 
 # Domain/webroot is resolved — begin capturing the run under its key (the domain,
 # or the webroot's name when a bare path was given with no domain).
@@ -296,7 +302,7 @@ if [ -z "$MODE" ]; then
     echo -e "${CYAN}Select mode:${RESET}"
     echo "1) manual"
     echo "2) automate"
-    read -r -p "Enter choice (1 or 2): " MODE_CHOICE
+    read -r -e -p "Enter choice (1 or 2): " MODE_CHOICE
 
     if [[ "$MODE_CHOICE" == "1" ]]; then
         MODE="manual"
@@ -318,7 +324,7 @@ if [ -z "$STRATEGY" ]; then
     echo -e "${CYAN}Select search strategy:${RESET}"
     echo "1) linear  (disable all, then enable one-by-one — finds every culprit)"
     echo "2) binary  (disable all, then bisect by enabling — faster, one culprit)"
-    read -r -p "Enter choice (1 or 2): " STRATEGY_CHOICE
+    read -r -e -p "Enter choice (1 or 2): " STRATEGY_CHOICE
 
     if [[ "$STRATEGY_CHOICE" == "1" ]]; then
         STRATEGY="linear"
@@ -369,7 +375,7 @@ cancel_scan(){
     trap '' INT TERM                # a second Ctrl+C must not interrupt the restore
     echo
     info "Cancelling scan — restoring all plugins to their original state..."
-    [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$PH_EDITED_CFG"
+    debug_restore_off               # put wp-config (debugging) back as we found it
     restore_all
     success "All plugins restored. Scan cancelled."
     exit 0
@@ -484,7 +490,7 @@ trap 'admin_logout; finish_log' EXIT
 # never needs it.
 if [[ "$MODE" == "automate" ]]; then
     if [ -z "$DOMAIN" ]; then
-        read -r -p "Enter domain (without https://): " DOMAIN
+        read -r -e -p "Enter domain (without https://): " DOMAIN
     fi
     CHECK_URL="https://$DOMAIN/"
 
@@ -494,11 +500,11 @@ if [[ "$MODE" == "automate" ]]; then
         echo "1) front page"
         echo "2) admin dashboard  (logs in by itself — no password is changed)"
         echo "3) a custom page    (path or URL; a /wp-admin/... page is checked logged in)"
-        read -r -p "Enter choice (1-3) [1]: " TARGET_CHOICE
+        read -r -e -p "Enter choice (1-3) [1]: " TARGET_CHOICE
         case "${TARGET_CHOICE:-1}" in
             1) CHECK_TARGET="front" ;;
             2) CHECK_TARGET="admin" ;;
-            3) read -r -p "Page path or URL (e.g. /shop or /wp-admin/edit.php): " CHECK_TARGET
+            3) read -r -e -p "Page path or URL (e.g. /shop or /wp-admin/edit.php): " CHECK_TARGET
                [ -n "$CHECK_TARGET" ] || { error "No page given."; exit 1; } ;;
             *) error "Invalid choice."; exit 1 ;;
         esac
@@ -611,7 +617,7 @@ check_site() {
 ask_resolved() {
     RESOLVED="no"
     if [[ "$MODE" == "manual" ]]; then
-        read -r -p "Is the issue resolved now? [y/N, c=cancel]: " ANS
+        read -r -e -p "Is the issue resolved now? [y/N, c=cancel]: " ANS
         [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
         [[ "$ANS" =~ ^[Yy]$ ]] && RESOLVED="yes"
     else
@@ -654,7 +660,7 @@ keep_disabled() {
     error "Identified and disabled: $NAME"
     [[ "$AUTO_ACCEPT" == "yes" ]] && return 0
     [[ "$MODE" == "automate" ]] && return 0   # confirmed later, all at once
-    read -r -p "Keep \"$NAME\" disabled? [Y/n, c=cancel]: " ANS
+    read -r -e -p "Keep \"$NAME\" disabled? [Y/n, c=cancel]: " ANS
     [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
     [[ "$ANS" =~ ^[Nn]$ ]] && return 1
     return 0
@@ -704,7 +710,7 @@ finalize_culprits() {
     info "These plugin(s) break the site and are kept disabled:"
     for NAME in "${CONFIRMED[@]}"; do info "  - $NAME"; done
     local ANS
-    read -r -p "Keep all of them disabled? [Y/n, c=cancel]: " ANS
+    read -r -e -p "Keep all of them disabled? [Y/n, c=cancel]: " ANS
     [[ "$ANS" =~ ^[Cc]$ ]] && cancel_scan
     if [[ "$ANS" =~ ^[Nn]$ ]]; then
         for NAME in "${CONFIRMED[@]}"; do
@@ -749,7 +755,7 @@ verify_baseline() {
     error "Site is still broken with every plugin disabled — the cause is not a plugin."
     info "Restoring all plugins..."
     restore_all
-    offer_wp_debug
+    debug_finish_unresolved
     info "Log file: $LOG_FILE"
     exit 1
 }
@@ -784,7 +790,7 @@ linear_search() {
 
         local broke="no"
         if [[ "$MODE" == "manual" ]]; then
-            read -r -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
+            read -r -e -p "Enabled \"$NAME\". Did the issue come back? [y/N, c=cancel]: " MAN
             [[ "$MAN" =~ ^[Cc]$ ]] && cancel_scan
             [[ "$MAN" =~ ^[Yy]$ ]] && broke="yes"
         else
@@ -812,12 +818,13 @@ linear_search() {
     echo
     if [ "${#CONFIRMED[@]}" -eq 0 ]; then
         success "Scan complete. No problematic plugin found — all re-enabled."
-        offer_wp_debug
+        debug_finish_unresolved
     else
         success "Scan complete. ${#CONFIRMED[@]} problematic plugin(s) left disabled:"
         for NAME in "${CONFIRMED[@]}"; do
             info "  - $NAME  (at $PLUGINS/$NAME.off)"
         done
+        debug_restore_off
     fi
     info "Log file: $LOG_FILE"
     exit 0
@@ -977,7 +984,9 @@ binary_search() {
     [ "${#declined[@]}" -gt 0 ] && info "Flagged but kept enabled at your request: ${declined[*]}"
     [ "${#PINNED[@]}" -gt 0 ] && info "Pinned on (kept enabled): ${PINNED[*]}"
     if [[ "$failed" == "yes" ]] || { [ "${#CONFIRMED[@]}" -eq 0 ] && [ "${#declined[@]}" -eq 0 ]; }; then
-        offer_wp_debug
+        debug_finish_unresolved
+    else
+        debug_restore_off
     fi
     exit 0
 }
@@ -999,27 +1008,10 @@ find_wpconfig() {   # echo wp-config.php path or nothing
     [ -f "$up/wp-config.php" ] && printf '%s' "$up/wp-config.php"
 }
 
-# Turn WP_DEBUG_LOG on so fatals land in wp-content/debug.log; keep a backup.
-enable_debug_log() {   # $1 wp-config path
-    local cfg="$1"
-    cp -p "$cfg" "$cfg.plughunter.bak" 2>/dev/null || return 1
-    sed -i -E "s@^([[:space:]]*define\([[:space:]]*['\"](WP_DEBUG|WP_DEBUG_LOG|WP_DEBUG_DISPLAY)['\"])@// plugin-hunter // \1@" "$cfg"
-    awk 'BEGIN{d=0}
-         {print}
-         (!d && $0 ~ /<\?php/){
-             print "/* plugin-hunter temporary debug (auto-removed) */";
-             print "define(\047WP_DEBUG\047, true);";
-             print "define(\047WP_DEBUG_LOG\047, true);";
-             print "define(\047WP_DEBUG_DISPLAY\047, false);";
-             d=1
-         }' "$cfg" > "$cfg.phtmp" 2>/dev/null && mv "$cfg.phtmp" "$cfg" || {
-        mv -f "$cfg.plughunter.bak" "$cfg" 2>/dev/null; return 1; }
-    PH_EDITED_CFG="$cfg"
-}
-
+# Clean up a wp-config left half-edited by a crash of an OLDER version that used
+# a temporary ".plughunter.bak" — current runs back up through enable_wp_debug.
 restore_wpconfig() {   # $1 wp-config path
     [ -n "${1:-}" ] && [ -f "$1.plughunter.bak" ] && mv -f "$1.plughunter.bak" "$1"
-    PH_EDITED_CFG=""
 }
 
 # Pull the plugin slug from the newest fatal line in a blob of text (a page body
@@ -1058,10 +1050,9 @@ fastpath_hunt() {
         fi
         # 2) an existing debug.log
         [ -z "$slug" ] && [ -f "$DEBUG_LOG" ] && slug=$(extract_plugin_slug "$(tail -n 300 "$DEBUG_LOG" 2>/dev/null)")
-        # 3) last resort: turn WP_DEBUG_LOG on, re-trigger, read the fresh log
-        if [ -z "$slug" ] && [ -n "$cfg" ] && [ -n "$url" ]; then
-            [ -n "$PH_EDITED_CFG" ] || enable_debug_log "$cfg" || break
-            : > "$DEBUG_LOG" 2>/dev/null || true
+        # 3) re-trigger and re-read the fresh log — debugging was switched on at
+        #    the start of the run, so the fatal is being written to the log now
+        if [ -z "$slug" ] && [ -n "$url" ] && [ -n "$PH_DEBUG_ON" ]; then
             fetch_page front "$url" >/dev/null
             [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null
             sleep 1
@@ -1078,7 +1069,7 @@ fastpath_hunt() {
         sleep 2
         ask_resolved
         if [[ "$RESOLVED" == "yes" ]]; then
-            [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$cfg"
+            debug_restore_off          # fixed — put wp-config (debugging) back
             CONFIRMED=("${changed[@]}")
             echo
             success "Fast path: healthy after disabling ${#CONFIRMED[@]} plugin(s) read from the debug log — full hunt skipped:"
@@ -1087,8 +1078,8 @@ fastpath_hunt() {
         fi
     done
 
-    # Inconclusive: undo everything so the normal hunt runs exactly as before.
-    [ -n "$PH_EDITED_CFG" ] && restore_wpconfig "$cfg"
+    # Inconclusive: re-enable the plugins we touched so the normal hunt runs
+    # exactly as before. Debugging stays on — the full hunt relies on it too.
     local s
     for s in "${changed[@]}"; do
         [ -d "$PLUGINS/$s.off" ] && mv "$PLUGINS/$s.off" "$PLUGINS/$s"
@@ -1098,14 +1089,16 @@ fastpath_hunt() {
 }
 
 #############################################
-#     WP_DEBUG ON (when the hunt can't fix)  #
+#  WP_DEBUG ON (switched on at the start)    #
 #############################################
-# When no plugin turns out to be the fix, the next step is to see the real PHP
-# error. These switch WP_DEBUG, WP_DEBUG_LOG and WP_DEBUG_DISPLAY on in
-# wp-config.php — permanently, unlike the fast path's temporary log — after a
-# timestamped backup. Each constant is checked first: one already on is left
-# alone, one set to something else is flipped in place, a missing one is added
-# right after <?php. If php -l rejects the edited file, the backup is restored.
+# Debugging goes on BEFORE the hunt so the real PHP error is written to the page
+# and to wp-content/debug.log from the outset — the fast path reads that to name
+# the culprit. This switches WP_DEBUG, WP_DEBUG_LOG and WP_DEBUG_DISPLAY on in
+# wp-config.php after a timestamped backup. Each constant is checked first: one
+# already on is left alone, one set to something else is flipped in place, a
+# missing one is added right after <?php. If php -l rejects the edited file, the
+# backup is restored. The backup is remembered so the end of the run can turn
+# debugging back off (site fixed, or the operator asks) in one move.
 WP_DEBUG_RE_DEF="^[[:space:]]*define\\([[:space:]]*['\"]"   # start of a define('KEY'
 enable_wp_debug() {
     local cfg bak k
@@ -1139,40 +1132,91 @@ enable_wp_debug() {
         error "The edited wp-config.php failed php -l — restored the original. Turn WP_DEBUG on by hand."
         return 1
     fi
+    # Remember what we changed so the end of the run can put it back exactly.
+    PH_DEBUG_BAK="$bak"
+    PH_DEBUG_ON=1
     info "Backup of the original wp-config.php: $bak"
 }
 
-# Ask (or obey --debug / --no-debug), turn debugging on, then show the fresh error.
-offer_wp_debug() {
+# Turn debugging on at the START of the run (unless --no-debug), then re-trigger
+# the site once so the real fatal lands on the page and in the debug log — which
+# is what the fast path then reads to name the culprit plugin. A no-op if every
+# constant was already on (nothing of ours to undo later).
+start_wp_debug() {
+    [[ "$DEBUG_OFFER" == "no" ]] && return 0
+    enable_wp_debug || return 0
+    [ -n "$PH_DEBUG_ON" ] && info "WordPress debugging is on for the hunt — the real error now shows on the page and in $DEBUG_LOG."
+    local url="${CHECK_URL:-}"
+    [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
+    if [ -n "$url" ]; then
+        fetch_page front "$url" >/dev/null 2>&1
+        [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null 2>&1
+        sleep 1
+    fi
+    return 0
+}
+
+# Put wp-config back the way it was (debugging off) — used when the site is fixed,
+# or when the operator asks for it. Idempotent.
+debug_restore_off() {
+    [ -n "$PH_DEBUG_ON" ] && [ -n "$PH_DEBUG_BAK" ] && [ -f "$PH_DEBUG_BAK" ] || { PH_DEBUG_ON=""; return 0; }
+    local cfg; cfg=$(find_wpconfig)
+    if [ -n "$cfg" ] && mv -f "$PH_DEBUG_BAK" "$cfg"; then
+        info "WordPress debugging turned back off (wp-config.php restored)."
+    fi
+    PH_DEBUG_ON=""; PH_DEBUG_BAK=""
+}
+
+# The hunt ended WITHOUT fixing the site. Debugging was switched on at the start,
+# so the real PHP error is already on the page and in the log: show it, then ask
+# whether to keep debugging on (to keep reading it) or turn it back off. --debug
+# keeps it on without asking; --no-debug never touched wp-config, so there is
+# nothing to show or revert.
+debug_finish_unresolved() {
     [[ "$DEBUG_OFFER" == "no" ]] && return 0
     echo
-    if [[ "$DEBUG_OFFER" != "yes" ]]; then
-        local ANS
-        info "The hunt could not fix the site. WordPress debugging will show the real error."
-        read -r -p "Turn on WP_DEBUG, WP_DEBUG_LOG and WP_DEBUG_DISPLAY? [y/N]: " ANS
-        [[ "$ANS" =~ ^[Yy]$ ]] || { info "WP_DEBUG left unchanged."; return 0; }
-    fi
-    enable_wp_debug || return 0
+    info "The hunt could not fix the site — here is the real PHP error, with debugging on."
 
     # Re-trigger the site once so the newest error lands in the log.
     local url="${CHECK_URL:-}"
     [ -z "$url" ] && [ -n "$DOMAIN" ] && url="https://$DOMAIN/"
     if [ -n "$url" ]; then
-        fetch_page front "$url" >/dev/null
-        [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null
+        fetch_page front "$url" >/dev/null 2>&1
+        [ -n "${CHECK_PAGE:-}" ] && fetch_page "${CHECK_PAGE%%|*}" "${CHECK_PAGE#*|}" >/dev/null 2>&1
         sleep 1
     fi
     if [ -s "$DEBUG_LOG" ]; then
         info "Latest lines of $DEBUG_LOG:"
         tail -n 15 "$DEBUG_LOG"
     else
-        info "Reload the site — errors now show on the page and in $DEBUG_LOG."
+        info "Reload the site — errors show on the page and in $DEBUG_LOG."
     fi
-    error "Errors are now visible to visitors too — turn WP_DEBUG off (or restore the backup) when you're done."
+
+    # Nothing of ours to keep or revert (debugging was already on, or we failed to
+    # enable it) — leave the owner's wp-config exactly as we found it.
+    [ -n "$PH_DEBUG_ON" ] || return 0
+
+    if [[ "$DEBUG_OFFER" == "yes" ]]; then
+        error "Debugging left ON — WP_DEBUG_DISPLAY shows errors to visitors; turn it off when you're done. Backup: $PH_DEBUG_BAK"
+        PH_DEBUG_ON=""            # keep on at the operator's request; don't auto-revert
+        return 0
+    fi
+
+    local ANS
+    read -r -e -p "Keep WordPress debugging ON so you can read the error, or turn it back off? [k=keep / O=off]: " ANS
+    if [[ "$ANS" =~ ^[Kk]$ ]]; then
+        error "Debugging left ON — WP_DEBUG_DISPLAY shows errors to visitors; turn it off when you're done. Backup: $PH_DEBUG_BAK"
+        PH_DEBUG_ON=""
+    else
+        debug_restore_off
+    fi
 }
 
 # ---------- Dispatch ----------
-# Try the quick debug-log fast path first; fall back to the chosen full strategy.
+# First, turn WordPress debugging on (unless --no-debug) so the real fatal is
+# written to the page and the log — that is what the fast path reads to name the
+# culprit. Then try the quick debug-log fast path; fall back to the full strategy.
+start_wp_debug
 if [[ "$FAST" == "yes" ]] && fastpath_hunt; then
     exit 0
 fi

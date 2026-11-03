@@ -310,16 +310,82 @@
         </header>
 
         <nav class="toc" role="group" aria-label="Filter by script">
-            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.0</span></button>
-            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.13.0</span></button>
-            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.0</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.0</span></button>
+            <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.8.1</span></button>
+            <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.14.0</span></button>
+            <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.1</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.1</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
-            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.3.0</span></button>
+            <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.4.0</span></button>
         </nav>
 
         <div class="entries" id="entries">
+
+            <!-- ============ 2026-11-03 ============ -->
+            <article class="entry" data-script="plugin-hunter" data-date="2026-11-03">
+                <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.14.0</span><time datetime="2026-11-03">2026-11-03</time>
+                </div>
+                <ul class="en">
+                    <li><strong>Debugging is now turned on first, not last.</strong> Before the hunt (unless <code>--no-debug</code>) it switches <code>WP_DEBUG</code>, <code>WP_DEBUG_LOG</code> and <code>WP_DEBUG_DISPLAY</code> on in <code>wp-config.php</code> (already-on ones left alone, a timestamped backup kept), so the real PHP error is on the page and in <code>wp-content/debug.log</code> from the start — and the fast path reads that log to name the culprit plugin straight away.</li>
+                    <li><strong>It cleans up after itself.</strong> When a plugin is found and disabling it fixes the site, debugging is turned <strong>back off</strong> automatically (the backup is restored). Only when the hunt ends <em>without</em> a fix does it print the newest log lines and ask whether to <strong>keep debugging on</strong> (to keep reading the error) or <strong>turn it back off</strong>. <code>--debug</code> keeps it on without asking; <code>--no-debug</code> never touches <code>wp-config.php</code>.</li>
+                    <li>Over-pressing backspace at a prompt can no longer eat into the question text (readline line-editing).</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>حالا دیباگ اول روشن می‌شود، نه آخر.</strong> پیش از هانت (مگر با <code>--no-debug</code>)، <code>WP_DEBUG</code>، <code>WP_DEBUG_LOG</code> و <code>WP_DEBUG_DISPLAY</code> را در <code>wp-config.php</code> روشن می‌کند (آن‌هایی که روشن‌اند دست نمی‌خورند و یک بکاپ زمان‌دار نگه داشته می‌شود)، تا خطای واقعی PHP از همان ابتدا روی صفحه و در <code>wp-content/debug.log</code> باشد — و مسیر سریع همان لاگ را می‌خواند تا بلافاصله افزونهٔ مقصر را نام ببرد.</li>
+                    <li><strong>بعد از خودش تمیزکاری می‌کند.</strong> وقتی افزونه‌ای پیدا شود و غیرفعال‌کردنش سایت را درست کند، دیباگ خودکار <strong>دوباره خاموش می‌شود</strong> (بکاپ برگردانده می‌شود). فقط وقتی هانت <em>بدون</em> حل مشکل تمام شود، آخرین خطوط لاگ را نشان می‌دهد و می‌پرسد دیباگ <strong>روشن بماند</strong> (برای خواندن خطا) یا <strong>دوباره خاموش شود</strong>. <code>--debug</code> بدون پرسیدن روشن نگهش می‌دارد؛ <code>--no-debug</code> هیچ‌وقت <code>wp-config.php</code> را دست نمی‌زند.</li>
+                    <li>زیاد زدنِ backspace در یک پرامپت دیگر متنِ سؤال را پاک نمی‌کند (ویرایش خطیِ readline).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="thing-to-link" data-date="2026-11-03">
+                <div class="entry-head"><span class="script-tag" data-script="thing-to-link">thing-to-link.sh</span><span class="ver">1.4.0</span><time datetime="2026-11-03">2026-11-03</time>
+                </div>
+                <ul class="en">
+                    <li><strong>A local file is no longer copied into <code>/tmp</code>.</strong> The temporary (php/python) link now serves it straight from where it lives via a symlink, so handing out even a large backup is instant and uses no extra disk. (A URL is still downloaded and a directory still archived, since those produce a new file.)</li>
+                    <li>At the backend menu you can now just <strong>paste a path or URL instead of a number</strong> — that takes the web-root copy with what you typed as the input.</li>
+                    <li>Over-pressing backspace at a prompt can no longer eat into the question text (readline line-editing).</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>فایل محلی دیگر در <code>/tmp</code> کپی نمی‌شود.</strong> لینک موقت (php/python) حالا آن را با symlink درست از همان‌جا که هست سرو می‌کند، پس دادنِ حتی یک بکاپ بزرگ آنی است و فضای اضافی مصرف نمی‌کند. (URL هنوز دانلود و پوشه هنوز آرشیو می‌شود، چون فایل تازه می‌سازند.)</li>
+                    <li>در منوی انتخاب بک‌اند حالا می‌توانید به‌جای عدد، <strong>یک مسیر یا URL پیست کنید</strong> — همان کپیِ web root را با همان ورودی برمی‌دارد.</li>
+                    <li>زیاد زدنِ backspace در یک پرامپت دیگر متنِ سؤال را پاک نمی‌کند (ویرایش خطیِ readline).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="wp-core" data-date="2026-11-03">
+                <div class="entry-head"><span class="script-tag" data-script="wp-core">wp-core.sh</span><span class="ver">1.9.1</span><time datetime="2026-11-03">2026-11-03</time>
+                </div>
+                <ul class="en">
+                    <li>Menu option 7 was renamed from the unclear &quot;Cascading update … in Persian&quot; to <strong>&quot;Safe upgrade to the newest version your PHP supports (Persian site)&quot;</strong>. Same behaviour — a clearer label.</li>
+                    <li>Over-pressing backspace at a prompt can no longer eat into the question text (readline line-editing).</li>
+                </ul>
+                <ul class="fa">
+                    <li>نام گزینهٔ ۷ از «آپدیت آبشاری … فارسی» که گویا نبود به <strong>«ارتقای امن به جدیدترین نسخه‌ای که PHPِ شما پشتیبانی می‌کند (سایت فارسی)»</strong> تغییر کرد. رفتار همان است — فقط برچسب شفاف‌تر شد.</li>
+                    <li>زیاد زدنِ backspace در یک پرامپت دیگر متنِ سؤال را پاک نمی‌کند (ویرایش خطیِ readline).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="magic-move" data-date="2026-11-03">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.7.1</span><time datetime="2026-11-03">2026-11-03</time>
+                </div>
+                <ul class="en">
+                    <li>Over-pressing backspace at a prompt can no longer eat into the question text — all interactive prompts now use readline line-editing (password prompts are unchanged).</li>
+                </ul>
+                <ul class="fa">
+                    <li>زیاد زدنِ backspace در یک پرامپت دیگر متنِ سؤال را پاک نمی‌کند — همهٔ پرامپت‌های تعاملی حالا از ویرایش خطیِ readline استفاده می‌کنند (پرامپت‌های رمز عوض نشده‌اند).</li>
+                </ul>
+            </article>
+
+            <article class="entry" data-script="pro-plugin-manager" data-date="2026-11-03">
+                <div class="entry-head"><span class="script-tag" data-script="pro-plugin-manager">pro-plugin-manager.sh</span><span class="ver">1.8.1</span><time datetime="2026-11-03">2026-11-03</time>
+                </div>
+                <ul class="en">
+                    <li>Over-pressing backspace at a prompt can no longer eat into the question text — all interactive prompts now use readline line-editing.</li>
+                </ul>
+                <ul class="fa">
+                    <li>زیاد زدنِ backspace در یک پرامپت دیگر متنِ سؤال را پاک نمی‌کند — همهٔ پرامپت‌های تعاملی حالا از ویرایش خطیِ readline استفاده می‌کنند.</li>
+                </ul>
+            </article>
 
             <!-- ============ 2026-10-22 ============ -->
             <article class="entry" data-script="magic-move" data-date="2026-10-22">

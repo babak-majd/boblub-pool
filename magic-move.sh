@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.7.0
+#   Version   : 2.7.1
 # ════════════════════════════════════════════════════════════
-VERSION="2.7.0"
+VERSION="2.7.1"
 
 set -u
 
@@ -348,7 +348,7 @@ if [ -z "$MODE" ]; then
     echo "  2) destination  — re-check and heal broken PHP sites"
     echo "  3) sync only    — rsync selected accounts' homes to the destination"
     echo "  4) prep only    — stop SecCheck/scanners & whitelist the peer (no sync)"
-    read -r -p "Enter choice (1-4): " MODE_CHOICE
+    read -r -e -p "Enter choice (1-4): " MODE_CHOICE
     case "$MODE_CHOICE" in
         1) MODE="source" ;;
         2) MODE="destination" ;;
@@ -382,7 +382,7 @@ if [ "$MODE" = "source" ] && [ -z "$LIST_ONLY" ]; then
     echo -e "${CYAN}What should the source pass do?${RESET}"
     echo "  1) full pass   — health-check every domain and snapshot each page"
     echo "  2) list only   — just extract the account list (no requests, no snapshots)"
-    read -r -p "Enter choice (1 or 2) [1]: " SRC_CHOICE
+    read -r -e -p "Enter choice (1 or 2) [1]: " SRC_CHOICE
     case "${SRC_CHOICE:-1}" in
         1) LIST_ONLY="no" ;;
         2) LIST_ONLY="yes" ;;
@@ -426,10 +426,10 @@ if [ "$LIST_ONLY" != "yes" ] && [ "$MODE" != "sync" ] && [ "$MODE" != "prep" ]; 
     if [ -z "$SERVER_IP" ]; then
         DETECTED_IP=$(detect_server_ip)
         if [ -n "$DETECTED_IP" ]; then
-            read -r -p "Server IP [$DETECTED_IP]: " SERVER_IP
+            read -r -e -p "Server IP [$DETECTED_IP]: " SERVER_IP
             SERVER_IP="${SERVER_IP:-$DETECTED_IP}"
         else
-            read -r -p "Server IP (auto-detect failed, enter manually): " SERVER_IP
+            read -r -e -p "Server IP (auto-detect failed, enter manually): " SERVER_IP
         fi
         [ -n "$SERVER_IP" ] || { error "No server IP given."; exit 1; }
     fi
@@ -474,7 +474,7 @@ lookup_ns() {   # $1 = domain -> sets NS_CSV to exactly four comma-separated fie
 # Optional because it costs a DNS query per domain and needs a resolver tool;
 # --ns / --no-ns answer it up front.
 if [ "$MODE" = "source" ] && [ -z "$NS_LOOKUP" ]; then
-    read -r -p "Also record each domain's nameservers (ns1-ns4) in the CSV? [y/N]: " NS_CHOICE
+    read -r -e -p "Also record each domain's nameservers (ns1-ns4) in the CSV? [y/N]: " NS_CHOICE
     case "$NS_CHOICE" in [Yy]*) NS_LOOKUP="yes" ;; *) NS_LOOKUP="no" ;; esac
 fi
 if [ "$NS_LOOKUP" = "yes" ]; then
@@ -856,7 +856,7 @@ fmt_duration() {   # $1 = seconds -> "1h 02m 03s"
 offer_zip() {
     [ -t 0 ] || return 0            # non-interactive: leave the folder as-is
     local ans
-    read -r -p "Zip the output folder for transfer? [y/N]: " ans
+    read -r -e -p "Zip the output folder for transfer? [y/N]: " ans
     case "$ans" in [Yy]*) ;; *) return 0 ;; esac
     if command -v zip >/dev/null 2>&1; then
         rm -f "$OUT_DIR.zip"
@@ -894,10 +894,10 @@ select_accounts() {
             echo "  1) all accounts ($total_all)"
             echo "  2) specific users"
             echo "  3) a reseller's accounts"
-            read -r -p "Enter choice (1-3): " SEL
+            read -r -e -p "Enter choice (1-3): " SEL
             case "$SEL" in
                 1) : ;;
-                2) read -r -p "Usernames (space/comma separated): " USERS
+                2) read -r -e -p "Usernames (space/comma separated): " USERS
                    ROWS=$(filter_users "$ROWS" "$USERS")
                    [ -n "$ROWS" ] || { error "None of the given users matched."; exit 1; } ;;
                 3) echo -e "${CYAN}Resellers with accounts:${RESET}"
@@ -909,7 +909,7 @@ select_accounts() {
                        printf "  %2d) %-20s %s account(s)\n" "$ridx" "$rn" "$rc"
                        ridx=$((ridx+1))
                    done
-                   read -r -p "Enter reseller number: " rnum
+                   read -r -e -p "Enter reseller number: " rnum
                    [[ "$rnum" =~ ^[0-9]+$ ]] && [ "$rnum" -ge 1 ] && [ "$rnum" -le "${#reslist[@]}" ] \
                        || { error "Invalid selection."; exit 1; }
                    rline="${reslist[$((rnum-1))]}"; RESELLER="${rline#* }"
@@ -1089,7 +1089,7 @@ prep_source_ip() {   # $1 = who whitelists it (default: destination)
         fi
     ;; esac
     if [ -t 0 ]; then
-        read -r -p "This server's IP to whitelist on the $who [$ip]: " ans
+        read -r -e -p "This server's IP to whitelist on the $who [$ip]: " ans
         ip="${ans:-$ip}"
     fi
     case "$ip" in
@@ -1220,7 +1220,7 @@ print_prep_block() {   # $1 = role that runs it   $2 = this server's IP   $3 = w
     echo -e "  Also saved for scp: ${YELLOW}$block${RESET}"
     if [ "$wait" = "yes" ] && [ -t 0 ]; then
         echo
-        read -r -p "Press Enter here once the $role block has finished... " _
+        read -r -e -p "Press Enter here once the $role block has finished... " _
     fi
 }
 
@@ -1237,7 +1237,7 @@ maybe_prep_source() {   # $1 = destination IP (peer)
         fi
         local ans
         echo
-        read -r -p "Run migration prep on this source & print the destination block first? [Y/n]: " ans
+        read -r -e -p "Run migration prep on this source & print the destination block first? [Y/n]: " ans
         case "$ans" in [Nn]*) info "Prep skipped — make sure both servers are prepared."; return 0 ;; esac
     fi
     run_prep source "$1" || return 1
@@ -1260,11 +1260,11 @@ maybe_prep_source() {   # $1 = destination IP (peer)
 # host-key prompt is answered once; the copy then runs in a detached screen
 # (it survives a dropped session) and reuses that connection.
 ask_sync_target() {
-    if [ -z "$SYNC_IP" ]; then read -r -p "Destination server IP: " SYNC_IP || true; fi
+    if [ -z "$SYNC_IP" ]; then read -r -e -p "Destination server IP: " SYNC_IP || true; fi
     [ -n "$SYNC_IP" ] || { error "No destination IP given."; return 1; }
     [[ "$SYNC_IP" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { error "Invalid destination IP/host: $SYNC_IP"; return 1; }
     if [ -z "$SYNC_PORT" ]; then
-        read -r -p "Destination SSH port [22]: " SYNC_PORT || true
+        read -r -e -p "Destination SSH port [22]: " SYNC_PORT || true
         SYNC_PORT="${SYNC_PORT:-22}"
     fi
     [[ "$SYNC_PORT" =~ ^[0-9]+$ ]] && [ "$SYNC_PORT" -ge 1 ] && [ "$SYNC_PORT" -le 65535 ] \
@@ -1302,7 +1302,7 @@ echo "  Accounts : $n"
 printf '  Duration : %dh %02dm %02ds\n' $((s/3600)) $(((s%3600)/60)) $((s%60))
 echo "  Log      : $log"
 echo "════════════════════════════════════════════════"
-read -r -p "Press Enter to close this screen... " _
+read -r -e -p "Press Enter to close this screen... " _
 RUNNER
 }
 
@@ -1407,7 +1407,7 @@ maybe_sync() {   # $1 = rows
         local n ans
         n=$(printf '%s\n' "$1" | grep -c .)
         echo
-        read -r -p "rsync these $n account(s)' home directories to the destination now? [y/N]: " ans
+        read -r -e -p "rsync these $n account(s)' home directories to the destination now? [y/N]: " ans
         case "$ans" in [Yy]*) ;; *) return 0 ;; esac
     fi
     start_sync "$1"
@@ -1476,7 +1476,7 @@ uri_enc() {    # stdin -> URI-encoded (the whmapi1 CLI takes key=value pairs URI
 ask_num() {   # $1 = prompt  $2 = default  $3 = highest number
     local ans
     while :; do
-        read -r -p "$1 [$2]: " ans || return 1
+        read -r -e -p "$1 [$2]: " ans || return 1
         ans="${ans:-$2}"
         if [[ "$ans" =~ ^[0-9]+$ ]] && [ "$ans" -ge 1 ] && [ "$ans" -le "$3" ]; then
             printf '%s' "$ans"; return 0
@@ -1486,7 +1486,7 @@ ask_num() {   # $1 = prompt  $2 = default  $3 = highest number
 }
 ask_yn() {    # $1 = prompt  $2 = default (y|n) -> 0 = yes
     local ans d="$2"
-    read -r -p "$1 [$([ "$d" = y ] && echo Y/n || echo y/N)]: " ans
+    read -r -e -p "$1 [$([ "$d" = y ] && echo Y/n || echo y/N)]: " ans
     case "${ans:-$d}" in [Yy]*) return 0 ;; *) return 1 ;; esac
 }
 
@@ -1616,7 +1616,7 @@ run_transfer_inner() {
     case "$ans" in
         2|3)
             local list u; local -A pick=()
-            read -r -p "Users ($([ "$ans" = 2 ] && echo to LEAVE OUT || echo to TAKE), space/comma separated): " list
+            read -r -e -p "Users ($([ "$ans" = 2 ] && echo to LEAVE OUT || echo to TAKE), space/comma separated): " list
             for u in ${list//,/ }; do pick[$u]=1; done
             keep=()
             for u in "${cand[@]}"; do
@@ -1634,12 +1634,12 @@ run_transfer_inner() {
     # ---- 2) where the source is (the source report gives the defaults)
     local host="${XFER_SRC_IP:-}" port="${XFER_SRC_PORT:-}"
     if [ -z "$host" ]; then
-        read -r -p "Source server IP${SRC_IP:+ [$SRC_IP]}: " host
+        read -r -e -p "Source server IP${SRC_IP:+ [$SRC_IP]}: " host
         host="${host:-$SRC_IP}"
     fi
     [[ "$host" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]*$ ]] || { error "Invalid source IP/host: ${host:-<empty>}"; return 1; }
     if [ -z "$port" ]; then
-        read -r -p "Source SSH port [${SRC_SSH_PORT:-22}]: " port
+        read -r -e -p "Source SSH port [${SRC_SSH_PORT:-22}]: " port
         port="${port:-${SRC_SSH_PORT:-22}}"
     fi
     [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || { error "Invalid SSH port: $port"; return 1; }
@@ -1703,8 +1703,8 @@ run_transfer_inner() {
     local o_comp=1 o_low=0 o_tt=2 o_rt=2 o_bak=0
     ask_yn "Compress the data in transit?" y || o_comp=0
     ask_yn "Package on the source at low priority (gentler on its live sites, slower)?" n && o_low=1
-    read -r -p "Transfer threads [2]: " ans; [[ "${ans:-2}" =~ ^[1-9][0-9]?$ ]] && o_tt="${ans:-2}"
-    read -r -p "Restore threads [2]: " ans;  [[ "${ans:-2}" =~ ^[1-9][0-9]?$ ]] && o_rt="${ans:-2}"
+    read -r -e -p "Transfer threads [2]: " ans; [[ "${ans:-2}" =~ ^[1-9][0-9]?$ ]] && o_tt="${ans:-2}"
+    read -r -e -p "Restore threads [2]: " ans;  [[ "${ans:-2}" =~ ^[1-9][0-9]?$ ]] && o_rt="${ans:-2}"
     ask_yn "Use the source's existing account backups when under 24h old (instead of packaging fresh)?" n && o_bak=1
 
     # ---- 6) session + source check (credentials, versions, accounts)
@@ -1877,7 +1877,7 @@ run_transfer_inner() {
                 if [ "$ans" = 4 ]; then
                     local nu=""
                     while :; do
-                        read -r -p "New username here for $user: " nu
+                        read -r -e -p "New username here for $user: " nu
                         if [[ ! "$nu" =~ ^[a-z][a-z0-9]{0,15}$ ]]; then echo "  Not a valid cPanel username."
                         elif [ -f "/var/cpanel/users/$nu" ] || getent passwd "$nu" >/dev/null || [ -n "${incand[$nu]:-}" ]; then echo "  '$nu' is already taken."
                         else break; fi
@@ -1886,12 +1886,12 @@ run_transfer_inner() {
                 elif ask_yn "  Same answer for every remaining conflict?" n; then
                     conflict_all="$ans"
                     if [ "$ans" = 3 ]; then
-                        read -r -p "  Type DELETE to confirm 'overwrite with delete' for all of them: " cf
+                        read -r -e -p "  Type DELETE to confirm 'overwrite with delete' for all of them: " cf
                         [ "$cf" = "DELETE" ] || { conflict_all=""; ans=1; info "Not confirmed — $user is ignored."; }
                     fi
                 fi
                 if [ "$ans" = 3 ] && [ "$conflict_all" != 3 ]; then
-                    read -r -p "  Type '$user' to confirm deleting the existing data here: " cf
+                    read -r -e -p "  Type '$user' to confirm deleting the existing data here: " cf
                     [ "$cf" = "$user" ] || { ans=1; info "Not confirmed — $user is ignored."; }
                 fi
             fi
@@ -2162,7 +2162,7 @@ run_prep_mode() {
         echo -e "${CYAN}Which side is THIS server?${RESET}"
         echo "  1) source       — stop SecCheck & scanners, whitelist the destination"
         echo "  2) destination  — the same, plus open SSH root login for the rsync"
-        read -r -p "Enter choice (1-2): " ans
+        read -r -e -p "Enter choice (1-2): " ans
         case "$ans" in
             1) side="source" ;;
             2) side="destination" ;;
@@ -2171,7 +2171,7 @@ run_prep_mode() {
     fi
     info "Prep mode: $side side"
     if [ -z "$PEER_IP" ]; then
-        read -r -p "IP of the other server ($([ "$side" = source ] && echo destination || echo source)): " PEER_IP
+        read -r -e -p "IP of the other server ($([ "$side" = source ] && echo destination || echo source)): " PEER_IP
     fi
     [ -n "$PEER_IP" ] || { error "No peer IP given."; exit 1; }
     [[ "$PEER_IP" =~ ^[0-9A-Fa-f:.]+$ ]] || { error "Invalid peer IP: $PEER_IP"; exit 1; }
@@ -2180,7 +2180,7 @@ run_prep_mode() {
     # root, so root SSH has to open here.
     local ssh=""
     if [ "$side" = "source" ] && [ -t 0 ]; then
-        read -r -p "Will the destination pull accounts with cPanel's Transfer Tool (opens root SSH on THIS source)? [y/N]: " ans
+        read -r -e -p "Will the destination pull accounts with cPanel's Transfer Tool (opens root SSH on THIS source)? [y/N]: " ans
         case "$ans" in [Yy]*) ssh="yes" ;; esac
     fi
     run_prep "$side" "$PEER_IP" "$ssh" || exit 1
@@ -2314,7 +2314,7 @@ run_source() {
 # ════════════════════════════════════════════════════════════
 run_destination() {
     # Input CSV: a local path or an http(s) URL (downloaded to a temp file).
-    [ -n "$CSV_IN" ] || { read -r -p "Source CSV to verify [$OUT_CSV]: " CSV_IN; CSV_IN="${CSV_IN:-$OUT_CSV}"; }
+    [ -n "$CSV_IN" ] || { read -r -e -p "Source CSV to verify [$OUT_CSV]: " CSV_IN; CSV_IN="${CSV_IN:-$OUT_CSV}"; }
     local user_dry="$DRY_RUN"       # the operator's own --dry-run (not the no-CloudLinux fallback)
 
     local tmp="" rtmp="" srcrep=""

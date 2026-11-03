@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.9.0
+#   Version   : 1.9.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.9.0"
+VERSION="1.9.1"
 
 #############################################
 #  COLOR PALETTE (Professional Terminal UI)
@@ -438,7 +438,7 @@ if [ -n "$WP_PATH" ]; then
 fi
 
 if [ -z "$WEBROOT" ] && [ -z "$DOMAIN" ]; then
-    read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+    read -e -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
 fi
 
 if [ -n "$WEBROOT" ]; then
@@ -637,9 +637,9 @@ create_database() {
     else
         # No panel/user context — the operator supplies an existing database.
         echo -e "${YELLOW}No control-panel user detected — enter existing database details.${NC}"
-        read -p "$(echo -e ${CYAN}'Database name: '${NC})" DB_NAME
-        read -p "$(echo -e ${CYAN}'Database user: '${NC})" DB_USER
-        read -p "$(echo -e ${CYAN}'Database password: '${NC})" DB_PASS
+        read -e -p "$(echo -e ${CYAN}'Database name: '${NC})" DB_NAME
+        read -e -p "$(echo -e ${CYAN}'Database user: '${NC})" DB_USER
+        read -e -p "$(echo -e ${CYAN}'Database password: '${NC})" DB_PASS
         [[ -n "$DB_NAME" && -n "$DB_USER" ]] || { echo -e "${RED}✘ Database name/user required.${NC}"; return 1; }
         return 0
     fi
@@ -656,7 +656,7 @@ fresh_install() {
     elif [[ -n "$CUSTOM_URL" ]]; then
         echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
     else
-        read -p "$(echo -e ${CYAN}'Version to install [default 6.9.5], "latest", or a custom zip URL/local path: '${NC})" INSTALL_INPUT
+        read -e -p "$(echo -e ${CYAN}'Version to install [default 6.9.5], "latest", or a custom zip URL/local path: '${NC})" INSTALL_INPUT
         if [[ "$INSTALL_INPUT" =~ ^https?:// ]]; then
             CUSTOM_URL="$INSTALL_INPUT"
             echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
@@ -670,7 +670,7 @@ fresh_install() {
 
     echo -e "${RED}⚠ This moves EVERY existing file in the webroot into old-files/.${NC}"
     if [[ "$ASSUME_YES" != "yes" ]]; then
-        read -p "$(echo -e ${YELLOW}'Proceed with fresh install? [y/N]: '${NC})" CONFIRM
+        read -e -p "$(echo -e ${YELLOW}'Proceed with fresh install? [y/N]: '${NC})" CONFIRM
         [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
     fi
 
@@ -1217,7 +1217,7 @@ manage_admins() {
     echo -e "${YELLOW}3) Create a new administrator${NC}"
     echo -e "${YELLOW}4) Generate a one-time login link${NC}"
     echo
-    read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" achoice
+    read -e -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" achoice
 
     case $achoice in
         1)
@@ -1229,7 +1229,7 @@ manage_admins() {
             echo -e "${BLUE}Current administrators:${NC}"
             wpdb_list_admins
             echo
-            read -p "$(echo -e ${CYAN}'Login to update: '${NC})" A_LOGIN
+            read -e -p "$(echo -e ${CYAN}'Login to update: '${NC})" A_LOGIN
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
             read -s -p "$(echo -e ${CYAN}'New password (blank = auto-generate): '${NC})" A_PASS; echo
             if [[ -z "$A_PASS" ]]; then
@@ -1242,10 +1242,10 @@ manage_admins() {
         3)
             echo
             A_SUGGEST=$(wpdb_suggest_login admin)
-            read -p "$(echo -e ${CYAN}"New admin login (${A_SUGGEST}): "${NC})" A_LOGIN
+            read -e -p "$(echo -e ${CYAN}"New admin login (${A_SUGGEST}): "${NC})" A_LOGIN
             A_LOGIN="${A_LOGIN:-$A_SUGGEST}"
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
-            read -p "$(echo -e ${CYAN}'Email: '${NC})" A_EMAIL
+            read -e -p "$(echo -e ${CYAN}'Email: '${NC})" A_EMAIL
             read -s -p "$(echo -e ${CYAN}'Password (blank = auto-generate): '${NC})" A_PASS; echo
             if [[ -z "$A_PASS" ]]; then
                 A_PASS=$(gen_password)
@@ -1261,7 +1261,7 @@ manage_admins() {
             echo -e "${BLUE}Administrators:${NC}"
             wpdb_list_admins
             echo
-            read -p "$(echo -e ${CYAN}'Login to sign in as: '${NC})" A_LOGIN
+            read -e -p "$(echo -e ${CYAN}'Login to sign in as: '${NC})" A_LOGIN
             [[ -n "$A_LOGIN" ]] || { echo -e "${RED}✘ Login required.${NC}"; return 1; }
             A_UID=$(wpdb_query <<< "SELECT ID FROM \`${WPDB_PREFIX}users\` WHERE user_login = '$(sql_escape "$A_LOGIN")';")
             [[ -n "$A_UID" ]] || { echo -e "${RED}✘ User '${A_LOGIN}' not found.${NC}"; return 1; }
@@ -1331,7 +1331,7 @@ if [[ "$WP_PRESENT" != true ]]; then
     echo -e "${YELLOW}1) Fresh install WordPress (move existing files to old-files)${NC}"
     echo -e "${YELLOW}0) Cancel${NC}"
     echo
-    read -p "$(echo -e ${GREEN}"Enter choice [0-1]: "${NC})" choice
+    read -e -p "$(echo -e ${GREEN}"Enter choice [0-1]: "${NC})" choice
     case $choice in
         1) fresh_install; exit 0 ;;
         *) echo -e "${BLUE}Cancelled.${NC}"; exit 0 ;;
@@ -1344,10 +1344,10 @@ echo -e "${YELLOW}3) Install the security patch for this version${WP_VERSION:+ (
 echo -e "${YELLOW}4) Install custom version${NC}"
 echo -e "${YELLOW}5) Rollback to previous core (old-core)${NC}"
 echo -e "${YELLOW}6) Manage administrator users${NC}"
-echo -e "${YELLOW}7) Cascading update — newest safe version your PHP supports, in Persian${NC}"
+echo -e "${YELLOW}7) Safe upgrade to the newest version your PHP supports (Persian site)${NC}"
 echo
 
-read -p "$(echo -e ${GREEN}"Enter choice [1-7]: "${NC})" choice
+read -e -p "$(echo -e ${GREEN}"Enter choice [1-7]: "${NC})" choice
 
 case $choice in
     1) action="repair" ;;
@@ -1386,7 +1386,7 @@ if [[ "$action" == "rollback" ]]; then
     echo -e "${BLUE}Current version :${NC} ${WP_VERSION:-unknown}"
     echo -e "${BLUE}Rollback target :${NC} ${OLD_VERSION:-unknown}"
     if [[ "$ASSUME_YES" != "yes" ]]; then
-        read -p "$(echo -e ${YELLOW}'Restore the previous core? This replaces the current core [y/N]: '${NC})" CONFIRM
+        read -e -p "$(echo -e ${YELLOW}'Restore the previous core? This replaces the current core [y/N]: '${NC})" CONFIRM
         [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
     fi
 
@@ -1462,7 +1462,7 @@ elif [[ "$action" == "cascade" ]]; then
             echo -e "${YELLOW}⚠ Could not auto-detect the server PHP version.${NC}"
         fi
         if [[ "$ASSUME_YES" != "yes" ]]; then
-            read -p "$(echo -e ${CYAN}"Server PHP version [${SERVER_PHP:-type it, e.g. 8.1}]: "${NC})" _phpin
+            read -e -p "$(echo -e ${CYAN}"Server PHP version [${SERVER_PHP:-type it, e.g. 8.1}]: "${NC})" _phpin
             [[ -n "$_phpin" ]] && SERVER_PHP="$_phpin"
         fi
     fi
@@ -1507,7 +1507,7 @@ elif [[ "$action" == "secpatch" ]]; then
         echo -e "${YELLOW}⚠ Could not reach the WordPress version API — can't check for the secure patch.${NC}"
         echo -e "${YELLOW}  Falling back to reinstalling the current version (${WP_VERSION}).${NC}"
         if [[ "$ASSUME_YES" != "yes" ]]; then
-            read -p "$(echo -e ${CYAN}"Reinstall ${WP_VERSION}? [Y/n]: "${NC})" _c
+            read -e -p "$(echo -e ${CYAN}"Reinstall ${WP_VERSION}? [Y/n]: "${NC})" _c
             [[ -z "$_c" || "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
         fi
         PKG_VERSION="$WP_VERSION"
@@ -1518,14 +1518,14 @@ elif [[ "$action" == "secpatch" ]]; then
     elif [[ "$SUGGEST" == "$WP_VERSION" ]] || ver_ge "$WP_VERSION" "$SUGGEST"; then
         echo -e "${GREEN}✔ Already on the latest secure ${branch} release (${WP_VERSION}).${NC}"
         if [[ "$ASSUME_YES" != "yes" ]]; then
-            read -p "$(echo -e ${CYAN}'Reinstall it to repair core files? [y/N]: '${NC})" _c
+            read -e -p "$(echo -e ${CYAN}'Reinstall it to repair core files? [y/N]: '${NC})" _c
             [[ "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Nothing to do.${NC}"; exit 0; }
         fi
         PKG_VERSION="$WP_VERSION"
     else
         echo -e "${GREEN}✔ Suggested security patch:${NC} ${SUGGEST} ${BLUE}(for your ${WP_VERSION})${NC}"
         if [[ "$ASSUME_YES" != "yes" ]]; then
-            read -p "$(echo -e ${CYAN}"Install ${SUGGEST}? [Y/n]: "${NC})" _c
+            read -e -p "$(echo -e ${CYAN}"Install ${SUGGEST}? [Y/n]: "${NC})" _c
             [[ -z "$_c" || "$_c" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; exit 0; }
         fi
         PKG_VERSION="$SUGGEST"
@@ -1539,7 +1539,7 @@ elif [[ "$action" == "custom" ]]; then
     elif [[ -n "$CUSTOM_URL" ]]; then
         echo -e "${BLUE}Custom core URL:${NC} $CUSTOM_URL"
     else
-        read -p "Enter custom WP version (example: 6.8.3), or a custom zip URL/local path: " CUSTOM_INPUT
+        read -e -p "Enter custom WP version (example: 6.8.3), or a custom zip URL/local path: " CUSTOM_INPUT
         if [[ "$CUSTOM_INPUT" =~ ^https?:// ]]; then
             CUSTOM_URL="$CUSTOM_INPUT"
         elif [[ -n "$CUSTOM_INPUT" && -f "$CUSTOM_INPUT" ]]; then

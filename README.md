@@ -76,7 +76,7 @@ Every script prints its version in its terminal header. Full per-script release 
 | **4** | Install custom version | You type the version (e.g. `6.8.3`) and it installs exactly that. |
 | **5** | Rollback to previous core | Restores the core that was replaced last time, from `old-core/`. Your undo button. |
 | **6** | Manage administrator users | Opens the admin submenu below. |
-| **7** | Cascading update (safe + PHP-compatible, Persian) | Starts at the **latest secure** release and steps **down** version by version until it reaches the newest one the server's PHP actually supports, installs it, and makes the site **Persian**. See below. |
+| **7** | Safe upgrade to the newest version your PHP supports (Persian site) | Starts at the **latest secure** release and steps **down** version by version until it reaches the newest one the server's PHP actually supports, installs it, and makes the site **Persian**. See below. |
 
 Options 1–4 all copy the current core into **`old-core/`** first, so option 5 can always bring it back.
 
@@ -232,9 +232,11 @@ Both strategies start the same way: **every plugin is disabled first**, and the 
 | **1** | linear | Re-enables plugins one at a time. When the site breaks, that plugin is flagged and left disabled, and the hunt continues. Simple and predictable. |
 | **2** | binary | Isolates a culprit by bisection (~log₂n checks), then re-enables everything and re-tests: healthy → done; still broken → hunt the next one. Same complete result as linear, far fewer checks. **Recommended.** |
 
-**Fast path (tried first).** Before any of that, it asks WordPress directly *which* plugin fatally errored — reading the shown error, an existing `wp-content/debug.log`, or briefly turning on `WP_DEBUG_LOG` and re-triggering the site — then disables just that plugin and re-checks, looping for any further culprit. If that fixes the site the whole search is skipped; if the log names no plugin (e.g. the fault is in the theme), everything it touched is undone and the normal hunt runs exactly as before. Only the culprit line of a fatal is trusted, so an ordinary asset URL can't be mistaken for a culprit. Turn it off with `--no-fast`.
+**Debugging is turned on first.** Before anything else (unless `--no-debug`), it switches `WP_DEBUG`, `WP_DEBUG_LOG` and `WP_DEBUG_DISPLAY` on in `wp-config.php` — already-on ones are left alone, a timestamped backup is kept — so the real PHP error lands on the page and in `wp-content/debug.log` from the outset. That is what lets the fast path name the culprit straight away.
 
-**When it can't fix the site.** If the hunt ends without a fix — no plugin culprit, a combination it can't pin down, or a fault that isn't a plugin — it asks whether to **turn WordPress debugging on**. On yes it checks `WP_DEBUG`, `WP_DEBUG_LOG` and `WP_DEBUG_DISPLAY` in `wp-config.php` and switches each one on (already-on ones are left alone, a timestamped backup is kept), then shows the newest lines of `wp-content/debug.log`. `--debug` does it without asking, `--no-debug` never offers. Errors become visible to visitors, so switch it off when you're done.
+**Fast path (tried next).** It asks WordPress directly *which* plugin fatally errored — reading the shown error or the fresh `wp-content/debug.log` — then disables just that plugin and re-checks, looping for any further culprit. If that fixes the site the whole search is skipped (and debugging is turned back off); if the log names no plugin (e.g. the fault is in the theme), everything it touched is undone and the normal hunt runs exactly as before. Only the culprit line of a fatal is trusted, so an ordinary asset URL can't be mistaken for a culprit. Turn it off with `--no-fast`.
+
+**When it fixes the site vs. when it can't.** If a plugin is found and disabling it fixes the site, debugging is turned **back off** automatically (the `wp-config.php` backup is restored). If the hunt ends *without* a fix — no plugin culprit, a combination it can't pin down, or a fault that isn't a plugin — it prints the newest lines of `wp-content/debug.log` (the real error is already visible) and asks whether to **keep debugging on** so you can keep reading it or **turn it back off**. `--debug` keeps it on without asking; `--no-debug` never touches `wp-config.php` at all. While it's on, errors are visible to visitors, so turn it off once you're done.
 
 Everything it does is logged to `/var/log/plugin-hunter/<domain>/<timestamp>.log` (with a `/tmp` fallback), and the path is printed when it finishes.
 
@@ -363,12 +365,13 @@ Give it one thing (a file path, a directory, or a URL), then pick **how** to pub
 | **python link** | A throwaway python server on a **random free port**, serving **just that one file** behind a **random token path** — not the folder, not anything else. Offered when `python3` exists. |
 | **php link** | The same, with `php -S`. Offered when php-cli exists. |
 
-Pick one directly with `--web`, `--python` or `--php` (or `--serve php|python`, `--webroot <dir>`).
+Pick one directly with `--web`, `--python` or `--php` (or `--serve php|python`, `--webroot <dir>`). At the menu you can also just **paste a path or URL instead of a number** — that takes the web-root copy with what you typed as the input.
 
 A directory is compressed first (`tar.gz` / `zip`); a URL is downloaded, then served from your server.
 
 **The temporary link (php/python) is ephemeral and self-contained:**
 
+- **A local file is never copied.** It's served straight from where it lives (via a symlink), so handing out even a huge backup is instant and uses no extra disk. (A URL still has to be downloaded and a directory still has to be archived, since those produce a new file.)
 - **One file only.** The link is `http://<ip>:<port>/<token>/<file>`; every other path — including `/` — returns `404`. No directory listing, nothing else on disk to reach. `Range` is supported, so an interrupted download can resume.
 - **The firewall port is opened for the run and closed again afterwards** — `firewalld` / `ufw` / `iptables` is auto-detected, the rule is uniquely tagged, and on teardown **exactly that rule is removed and then verified**, so no hole is ever left open.
 - **It lives only while the run does.** Press `Ctrl+C`, drop the SSH session (`SIGHUP`), or hit the `--timeout` you set (asked for; **max 12h**) and it tears everything down: server stopped, firewall closed, temp files removed. On timeout it blocks new connections first and lets an in-progress download finish. A background backstop closes the port even if the script is `kill -9`'d.

@@ -12,14 +12,16 @@
 #   A temporary (php/python) link serves EXACTLY one file behind a
 #   random token path, opens its port in the firewall for the life
 #   of the run, and tears everything down when your SSH session
-#   ends, on Ctrl+C, or when the timeout (max 12h) expires.
+#   ends, on Ctrl+C, or when the timeout (max 12h) expires. A local
+#   file is served straight from where it lives (a symlink, never a
+#   copy), so even a huge backup is handed out instantly.
 # ────────────────────────────────────────────────────────────
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.3.0
+#   Version   : 1.4.0
 # ════════════════════════════════════════════════════════════
-VERSION="1.3.0"
+VERSION="1.4.0"
 set +H
 
 WEBROOT="/var/www/html"
@@ -44,6 +46,8 @@ Publish a file, directory, or URL and get a download link. Only the backends
 this server actually has are offered; anything you omit is asked for.
 The default backend is the first one available, in this order:
 web root  →  python link  →  php link   (Enter at the menu picks it).
+At the menu you can also just paste a path or URL instead of a number — that
+takes the web-root copy with what you typed as the input.
 
 Options:
   -i, --input <path|url>  File, directory, or URL to publish. A bare positional
@@ -67,6 +71,10 @@ Options:
   -h, --help              Show this help and exit.
 
 Notes:
+  * A temporary (php/python) link serves a LOCAL file straight from its real
+    location via a symlink — it is never copied into /tmp, so even a large file
+    is handed out instantly. (A URL is still downloaded and a directory is still
+    archived, since those have to produce a new file.)
   * A temporary link lives only while THIS process does. If you run it inside
     tmux/screen it survives an SSH disconnect — the timeout still closes it.
   * On timeout, new connections are blocked first and in-progress downloads are
@@ -186,10 +194,19 @@ elif [ -z "$MODE" ]; then
     if [ -n "$WEB_OK" ];  then n=$((n+1)); MENU[$n]="webroot"; echo "  $n) web root     — copy into $WEBROOT (served by the running web server)$([ "$DEFAULT_MODE" = webroot ] && echo '  [default]')"; [ "$DEFAULT_MODE" = webroot ] && def_n=$n; fi
     if [ -n "$PY_BIN" ];  then n=$((n+1)); MENU[$n]="python";  echo "  $n) python link  — temporary python server on a random port, dies with your SSH session$([ "$DEFAULT_MODE" = python ] && echo '  [default]')"; [ "$DEFAULT_MODE" = python ] && def_n=$n; fi
     if [ -n "$PHP_BIN" ]; then n=$((n+1)); MENU[$n]="php";     echo "  $n) php link     — temporary php -S, same behaviour$([ "$DEFAULT_MODE" = php ] && echo '  [default]')"; [ "$DEFAULT_MODE" = php ] && def_n=$n; fi
-    read -r -p "Enter choice (1-$n) [$def_n]: " CHOICE
+    [ -n "$WEB_OK" ] && info "  (or just paste a file path, directory, or URL to use the web root)"
+    read -r -e -p "Enter choice (1-$n) [$def_n]: " CHOICE
     [ -n "$CHOICE" ] || CHOICE="$def_n"
-    MODE="${MENU[$CHOICE]:-}"
-    [ -n "$MODE" ] || { err "Invalid choice."; exit 1; }
+    if [ -n "${MENU[$CHOICE]:-}" ]; then
+        MODE="${MENU[$CHOICE]}"
+    elif [ -z "$input" ] && { [[ "$CHOICE" =~ ^https?:// ]] || [[ "$CHOICE" == /* ]] || [[ "$CHOICE" == ./* ]] || [[ "$CHOICE" == ~* ]] || [ -e "$CHOICE" ]; }; then
+        # Not a menu number but a path or URL: the operator skipped the menu and
+        # handed us the thing to publish — take the web root (the simple copy) and
+        # use what they typed as the input.
+        MODE="webroot"; input="$CHOICE"
+    else
+        err "Invalid choice."; exit 1
+    fi
 fi
 
 # A forced backend must actually be available.
@@ -201,7 +218,7 @@ info "Method: $MODE"
 
 # ---------- Resolve the input ----------
 if [ -z "$input" ]; then
-    read -r -p $'\033[36mEnter file path, directory, or URL:\033[0m ' input
+    read -r -e -p $'\033[36mEnter file path, directory, or URL:\033[0m ' input
 fi
 [ -n "$input" ] || { err "No input given."; exit 1; }
 
@@ -236,7 +253,7 @@ publish_webroot() {
         local comp_type="$COMPRESS"
         if [ -z "$comp_type" ]; then
             echo "Choose compression type:"; echo "1) tar.gz"; echo "2) zip"
-            read -r -p "Enter option (1 or 2): " opt
+            read -r -e -p "Enter option (1 or 2): " opt
             case "$opt" in 1) comp_type="tar.gz" ;; 2) comp_type="zip" ;; *) err "Invalid option."; return 1 ;; esac
         fi
         local outname
@@ -384,15 +401,21 @@ stage_payload() {
         fi
 
     elif [ -f "$input" ]; then
+        # Serve the file WHERE IT LIVES — a symlink into the token dir, never a
+        # copy. The whole point of the temporary link is to avoid duplicating a
+        # (possibly huge) file into /tmp just to hand it out; copying would waste
+        # the time and the disk. The router/server resolves the symlink on read.
         PAYLOAD_NAME=$(basename "$input")
-        cp "$input" "$DOCROOT/$TOKEN/$PAYLOAD_NAME" || { err "Could not stage the file."; return 1; }
+        local abs; abs=$(readlink -f -- "$input" 2>/dev/null) || abs="$input"
+        [ -n "$abs" ] || abs="$input"
+        ln -s "$abs" "$DOCROOT/$TOKEN/$PAYLOAD_NAME" || { err "Could not stage the file."; return 1; }
 
     elif [ -d "$input" ]; then
         local dn comp_type; dn=$(basename "$input"); comp_type="$COMPRESS"
         info "Detected directory: $dn"
         if [ -z "$comp_type" ]; then
             echo "Choose compression type:"; echo "1) tar.gz"; echo "2) zip"
-            read -r -p "Enter option (1 or 2): " opt
+            read -r -e -p "Enter option (1 or 2): " opt
             case "$opt" in 1) comp_type="tar.gz" ;; 2) comp_type="zip" ;; *) err "Invalid option."; return 1 ;; esac
         fi
         if [ "$comp_type" = "tar.gz" ]; then
@@ -405,7 +428,9 @@ stage_payload() {
     else
         err "Not a valid URL, file path, or directory."; return 1
     fi
-    chmod +r "$DOCROOT/$TOKEN/$PAYLOAD_NAME" 2>/dev/null
+    # Only the staged copies (URL download, directory archive) get a read bit; a
+    # symlinked local file is served as-is and its original perms are left alone.
+    [ -L "$DOCROOT/$TOKEN/$PAYLOAD_NAME" ] || chmod +r "$DOCROOT/$TOKEN/$PAYLOAD_NAME" 2>/dev/null
 }
 
 # ---------- Server scripts (one file, token-gated, 404 for everything else) ----------
@@ -545,7 +570,7 @@ publish_temp() {   # $1 = backend bin, $2 = kind (php|python)
 
     # Timeout: flag, else prompt (blank = 1h), capped at 12h.
     if [ -z "$TIMEOUT_RAW" ]; then
-        read -r -p "Keep the link alive for how long? (e.g. 30m, 2h; max 12h) [1h]: " TIMEOUT_RAW
+        read -r -e -p "Keep the link alive for how long? (e.g. 30m, 2h; max 12h) [1h]: " TIMEOUT_RAW
         [ -n "$TIMEOUT_RAW" ] || TIMEOUT_RAW="1h"
     fi
     TIMEOUT_SECS=$(parse_timeout "$TIMEOUT_RAW") || { err "Invalid timeout: $TIMEOUT_RAW"; return 1; }

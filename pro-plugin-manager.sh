@@ -6,9 +6,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.8.0
+#   Version   : 1.8.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.8.0"
+VERSION="1.8.1"
 
 
 #############################################
@@ -261,7 +261,7 @@ resolve_webroot() {
 
     # Ask for a domain only when -d was not supplied.
     if [ -z "$DOMAIN" ]; then
-        read -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
+        read -e -p "$(echo -e ${YELLOW}'Enter domain (or press Enter to use current directory as public_html): '${NC})" DOMAIN
     fi
 
     if [ -z "$DOMAIN" ]; then
@@ -591,7 +591,7 @@ manage_plugin() {
         update)   p_choice=2 ;;
         install)  p_choice=3 ;;
         rollback) p_choice=4 ;;
-        *)        read -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" p_choice ;;
+        *)        read -e -p "$(echo -e ${GREEN}"Enter choice [1-4]: "${NC})" p_choice ;;
     esac
 
     local TARGET_VER=""
@@ -610,7 +610,7 @@ manage_plugin() {
             if [[ -n "$REQ_VERSION" ]]; then
                 TARGET_VER="$REQ_VERSION"
             else
-                read -p "$(echo -e ${YELLOW}"Enter version (example: 10.9.0): "${NC})" TARGET_VER
+                read -e -p "$(echo -e ${YELLOW}"Enter version (example: 10.9.0): "${NC})" TARGET_VER
             fi
             if [[ -z "$TARGET_VER" ]]; then
                 echo -e "${RED}✘ Version cannot be empty.${NC}"
@@ -689,7 +689,7 @@ manage_plugin() {
     elif [[ "$ASSUME_YES" == "yes" ]]; then
         ACT_CONFIRM="y"
     else
-        read -p "$(echo -e ${YELLOW}"Activate $slug now with wp-cli? [y/N]: "${NC})" ACT_CONFIRM
+        read -e -p "$(echo -e ${YELLOW}"Activate $slug now with wp-cli? [y/N]: "${NC})" ACT_CONFIRM
     fi
     if [[ "$ACT_CONFIRM" =~ ^[Yy]$ ]]; then
         echo -e "${MAGENTA}Activating plugin...${NC}"
@@ -737,7 +737,7 @@ plugin_rollback() {
 
     echo -e "${BLUE}Rollback target :${NC} ${OLD_VER:-unknown}"
     if [[ "$ASSUME_YES" != "yes" ]]; then
-        read -p "$(echo -e ${YELLOW}'Restore the previous plugin? This replaces the current one [y/N]: '${NC})" CONFIRM
+        read -e -p "$(echo -e ${YELLOW}'Restore the previous plugin? This replaces the current one [y/N]: '${NC})" CONFIRM
         [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
     fi
 
@@ -871,8 +871,8 @@ search_and_replace() {
     echo
 
     # --old / --new answer these prompts up-front (an empty --new is valid).
-    if [[ -n "$SR_OLD" ]]; then OLD="$SR_OLD"; else read -p "$(echo -e ${YELLOW}'Search for (old value): '${NC})" OLD; fi
-    if [[ "$SR_NEW_SET" == "yes" ]]; then NEW="$SR_NEW"; else read -p "$(echo -e ${YELLOW}'Replace with (new value): '${NC})" NEW; fi
+    if [[ -n "$SR_OLD" ]]; then OLD="$SR_OLD"; else read -e -p "$(echo -e ${YELLOW}'Search for (old value): '${NC})" OLD; fi
+    if [[ "$SR_NEW_SET" == "yes" ]]; then NEW="$SR_NEW"; else read -e -p "$(echo -e ${YELLOW}'Replace with (new value): '${NC})" NEW; fi
 
     if [[ -z "$OLD" ]]; then
         echo -e "${RED}✘ Search value cannot be empty.${NC}"
@@ -894,7 +894,7 @@ search_and_replace() {
         echo -e "${YELLOW}1) Dry run (count matches only, no changes)${NC}"
         echo -e "${YELLOW}2) Replace now${NC}"
         echo
-        read -p "$(echo -e ${GREEN}"Enter choice [1-2]: "${NC})" mode_choice
+        read -e -p "$(echo -e ${GREEN}"Enter choice [1-2]: "${NC})" mode_choice
         case "$mode_choice" in
             1) mode="count" ;;
             2) mode="apply" ;;
@@ -925,7 +925,7 @@ pm_ask_slug() {
     if [[ -z "$slug" ]]; then
         $WP_CMD plugin list --fields=name,status,version 2>/dev/null >&2
         echo >&2
-        read -p "$(echo -e ${YELLOW}"Plugin slug to $verb: "${NC})" slug
+        read -e -p "$(echo -e ${YELLOW}"Plugin slug to $verb: "${NC})" slug
     fi
     if [[ ! "$slug" =~ ^[A-Za-z0-9._-]+$ ]]; then
         echo -e "${RED}✘ Invalid plugin slug: '$slug'${NC}" >&2
@@ -948,7 +948,7 @@ pm_fix_perms() {
 pm_install() {
     local src="$PM_SRC" act="" out marker
     if [[ -z "$src" ]]; then
-        read -p "$(echo -e ${YELLOW}"Plugin zip — URL or local path: "${NC})" src
+        read -e -p "$(echo -e ${YELLOW}"Plugin zip — URL or local path: "${NC})" src
     fi
     if [[ -z "$src" ]]; then
         echo -e "${RED}✘ Source cannot be empty.${NC}"; return 1
@@ -962,7 +962,7 @@ pm_install() {
     local ACT_CONFIRM=""
     if   [[ "$NO_ACTIVATE" == "yes" ]]; then ACT_CONFIRM="n"
     elif [[ "$ASSUME_YES" == "yes" ]];  then ACT_CONFIRM="y"
-    else read -p "$(echo -e ${YELLOW}"Activate it after install? [y/N]: "${NC})" ACT_CONFIRM
+    else read -e -p "$(echo -e ${YELLOW}"Activate it after install? [y/N]: "${NC})" ACT_CONFIRM
     fi
     [[ "$ACT_CONFIRM" =~ ^[Yy]$ ]] && act="--activate"
 
@@ -974,7 +974,7 @@ pm_install() {
     if grep -qiE 'already exists|already installed' <<<"$out"; then
         local OW="n"
         if [[ "$ASSUME_YES" == "yes" ]]; then OW="y"
-        else read -p "$(echo -e ${YELLOW}"That plugin is already installed. Overwrite it? [y/N]: "${NC})" OW
+        else read -e -p "$(echo -e ${YELLOW}"That plugin is already installed. Overwrite it? [y/N]: "${NC})" OW
         fi
         if [[ "$OW" =~ ^[Yy]$ ]]; then
             out=$($WP_CMD plugin install "$src" $act --force 2>&1); echo "$out"
@@ -1014,13 +1014,13 @@ pm_delete() {
     fi
 
     if [[ "$ASSUME_YES" != "yes" ]]; then
-        read -p "$(echo -e ${YELLOW}"Delete plugin '$slug'? [y/N]: "${NC})" CONFIRM
+        read -e -p "$(echo -e ${YELLOW}"Delete plugin '$slug'? [y/N]: "${NC})" CONFIRM
         [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${BLUE}Cancelled.${NC}"; return 0; }
     fi
     if [[ "$PM_UNINSTALL" == "yes" ]]; then
         UN="y"
     else
-        read -p "$(echo -e ${YELLOW}"Also run its uninstall routine? It removes the plugin's settings/tables [y/N]: "${NC})" UN
+        read -e -p "$(echo -e ${YELLOW}"Also run its uninstall routine? It removes the plugin's settings/tables [y/N]: "${NC})" UN
     fi
 
     # Keep a copy of the files (same old-<slug>/ convention as the other features).
@@ -1070,7 +1070,7 @@ manage_plugins_wpcli() {
             echo -e "${YELLOW}4) Deactivate a plugin${NC}"
             echo -e "${YELLOW}5) Delete a plugin${NC}"
             echo
-            read -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" c
+            read -e -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" c
             ;;
     esac
 
@@ -1112,7 +1112,7 @@ main() {
     local feat="$FEATURE"
     if [ -z "$feat" ]; then
         show_menu
-        read -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" choice
+        read -e -p "$(echo -e ${GREEN}"Enter choice [1-5]: "${NC})" choice
         case $choice in
             1) feat="woocommerce" ;;
             2) feat="elementor" ;;
