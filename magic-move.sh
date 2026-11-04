@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.8.1
+#   Version   : 2.8.2
 # ════════════════════════════════════════════════════════════
-VERSION="2.8.1"
+VERSION="2.8.2"
 
 set -u
 
@@ -703,9 +703,11 @@ health() {
         body="${resp%$'\n'*}"
         H_CODE="$code"
         # A 503 is usually transient (lsphp spawning, load spike): retry it twice
-        # more (3 attempts in all) with a short pause before giving up.
+        # more (3 attempts in all) with a short pause before giving up. Show it.
         if [ "$code" = "503" ] && [ "$tries503" -lt 2 ]; then
-            tries503=$((tries503+1)); sleep 3; continue
+            tries503=$((tries503+1))
+            printf ' %b(503, retry %d/2)%b' "$YELLOW" "$tries503" "$RESET"
+            sleep 3; continue
         fi
         [ "$code" != "000" ] && break   # got a real answer; no need to wait longer
     done
@@ -2554,8 +2556,12 @@ run_destination() {
                 fi
             fi
 
-            # 3) PHP down again, now with plugins off / memory raised.
-            [ "$H_BROKEN" = "yes" ] && php_step_down "$user" "$domain" "$snap"
+            # 3) PHP down again — but ONLY if step 2 actually changed something
+            #    (a plugin went off or the memory limit went up); otherwise nothing
+            #    is different from step 1, so re-trying PHP would just repeat it.
+            if [ "$H_BROKEN" = "yes" ] && { [ -n "$DISABLED_PLUGINS" ] || [ -n "$MEM_NEEDED" ]; }; then
+                php_step_down "$user" "$domain" "$snap"
+            fi
 
             if [ "$H_STATUS" = "OK" ]; then
                 local what=""
