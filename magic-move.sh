@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.7.3
+#   Version   : 2.8.0
 # ════════════════════════════════════════════════════════════
-VERSION="2.7.3"
+VERSION="2.8.0"
 
 set -u
 
@@ -694,7 +694,7 @@ save_snapshot() {
 #   H_BROKEN  yes when a PHP version switch could plausibly clear it
 health() {
     local domain="$1" snap="$2"
-    local t resp code body=""
+    local t resp code body="" tries503=0
     H_CODE="000"
     for t in $TIMEOUTS; do
         resp=$(curl -kLsS --resolve "*:443:$SERVER_IP" --resolve "*:80:$SERVER_IP" \
@@ -702,6 +702,11 @@ health() {
         code="${resp##*$'\n'}"
         body="${resp%$'\n'*}"
         H_CODE="$code"
+        # A 503 is usually transient (lsphp spawning, load spike): retry it twice
+        # more (3 attempts in all) with a short pause before giving up.
+        if [ "$code" = "503" ] && [ "$tries503" -lt 2 ]; then
+            tries503=$((tries503+1)); sleep 3; continue
+        fi
         [ "$code" != "000" ] && break   # got a real answer; no need to wait longer
     done
 
@@ -720,6 +725,8 @@ health() {
             H_STATUS="Fail(wp error)"; H_BROKEN="yes"
         elif grep -qiE 'the ionCube Loader for PHP needs to be installed' <<<"$body"; then
             H_STATUS="Fail(ioncube)"; H_BROKEN="yes"
+        elif grep -qiE 'Allowed memory size of [0-9]+ bytes exhausted' <<<"$body"; then
+            H_STATUS="Fail(memory)"; H_BROKEN="yes"   # fixed by raising WP_MEMORY_LIMIT, not a PHP switch
         elif grep -qiE '<b>Fatal error' <<<"$body"; then
             H_STATUS="Fail(php fatal)"; H_BROKEN="yes"
         elif [ "$code" = "500" ]; then
@@ -830,6 +837,16 @@ heal_plugin_fatal() {   # $1 user  $2 domain
         n=$((n+1))
         health "$domain" ""         # re-fetch with debug on; no snapshot overwrite
         if [ "$H_STATUS" = "OK" ]; then rc=0; break; fi
+        # Memory exhaustion looks like a plugin fatal (the error names a plugin
+        # file), but the fix is raising the memory limit, NOT disabling the
+        # plugin. Flag it for the caller and stop — the caller raises the limit on
+        # the clean wp-config (after the debug edits here are rolled back).
+        if grep -qaiE 'Allowed memory size of [0-9]+ bytes exhausted' <<<"$H_BODY"; then
+            MEM_NEEDED=1; MEM_CFG="$cfg"
+            printf ' -> %bmemory exhausted%b' "$YELLOW" "$RESET"
+            log "DEST PLUGIN-HEAL $domain memory exhausted — will raise WP memory limit"
+            break
+        fi
         # The culprit is the first wp-content/plugins/<slug>/ path in the error.
         slug=$(printf '%s' "$H_BODY" \
                | grep -aoiE 'wp-content/plugins/[^/"'"'"' ]+' \
@@ -845,6 +862,7 @@ heal_plugin_fatal() {   # $1 user  $2 domain
         [ -e "$target" ] && target="$plugdir/$slug.dis.$(date +%s)"
         if mv "$plugdir/$slug" "$target" 2>/dev/null; then
             DISABLED_PLUGINS="${DISABLED_PLUGINS:+$DISABLED_PLUGINS,}$slug"
+            DISABLED_MOVES+=("$target|$plugdir/$slug")   # so the caller can re-enable it on failure
             printf ' -> %bdisabled %s%b' "$GREEN" "$slug" "$RESET"
             log "DEST PLUGIN-DISABLED $domain -> $slug (-> $(basename "$target"))"
         else
@@ -855,6 +873,63 @@ heal_plugin_fatal() {   # $1 user  $2 domain
 
     restore_wp_config "$cfg"
     return "$rc"
+}
+
+# Raise WordPress's memory limit in wp-config.php (the fix for an "Allowed memory
+# size exhausted" fatal). Any existing WP_MEMORY_LIMIT / WP_MAX_MEMORY_LIMIT
+# defines are commented out first so ours win, a backup is kept, and php -l guards
+# the edit. Permanent (survives the debug on/off cycle, which uses its own backup).
+raise_wp_memory() {   # $1 = wp-config path
+    [ -z "$DRY_RUN" ] || return 1
+    local cfg="$1"
+    [ -n "$cfg" ] && [ -f "$cfg" ] || return 1
+    cp -p "$cfg" "$cfg.mm-mem.bak" 2>/dev/null || return 1
+    sed -i -E "s@^([[:space:]]*define\([[:space:]]*['\"](WP_MEMORY_LIMIT|WP_MAX_MEMORY_LIMIT)['\"])@// magic-move // \1@" "$cfg"
+    awk 'BEGIN{done=0}
+         {print}
+         (!done && $0 ~ /<\?php/){
+             print "/* magic-move raised memory limit */";
+             print "define(\047WP_MEMORY_LIMIT\047, \0474096M\047);";
+             print "define(\047WP_MAX_MEMORY_LIMIT\047, \0474096M\047);";
+             done=1
+         }' "$cfg" > "$cfg.mmtmp" 2>/dev/null && mv "$cfg.mmtmp" "$cfg" || {
+        mv -f "$cfg.mm-mem.bak" "$cfg" 2>/dev/null; return 1; }
+    if command -v php >/dev/null 2>&1 && ! php -l "$cfg" >/dev/null 2>&1; then
+        mv -f "$cfg.mm-mem.bak" "$cfg"; return 1
+    fi
+    return 0
+}
+
+# Undo raise_wp_memory (used when the account could not be healed and we put
+# everything back the way we found it).
+restore_wp_memory() {   # $1 = wp-config path
+    [ -n "${1:-}" ] && [ -f "$1.mm-mem.bak" ] && mv -f "$1.mm-mem.bak" "$1"
+}
+
+# Re-enable every plugin heal_plugin_fatal disabled this account, newest first.
+restore_disabled_plugins() {
+    local m t o
+    for m in "${DISABLED_MOVES[@]}"; do
+        t="${m%%|*}"; o="${m#*|}"
+        [ -d "$t" ] && [ ! -e "$o" ] && mv "$t" "$o" 2>/dev/null
+    done
+    DISABLED_MOVES=()
+}
+
+# Step the PHP version DOWN through PHP_VERSIONS, re-checking the site after each,
+# skipping whatever version is already active; sets PHP_FIXED to the version that
+# worked. Returns 0 the moment the site is healthy, 1 if none helped.
+php_step_down() {   # $1 user  $2 domain  $3 snap
+    local user="$1" domain="$2" snap="$3" ver cur
+    cur=$(get_current_php "$user")
+    for ver in $PHP_VERSIONS; do
+        [ "$ver" = "$cur" ] && continue
+        switch_php "$user" "$ver"; sleep "$SETTLE"
+        health "$domain" "$snap"
+        printf ' -> PHP %s -> %s' "$ver" "$H_STATUS"
+        [ "$H_BROKEN" != "yes" ] && { PHP_FIXED="$ver"; return 0; }
+    done
+    return 1
 }
 
 # ---------- Snapshot Helper ----------
@@ -2424,7 +2499,7 @@ run_destination() {
     info "Accounts to verify: $total"
     echo
 
-    local snap sa orig ver before_status DISABLED_PLUGINS
+    local snap sa orig ver before_status DISABLED_PLUGINS DISABLED_MOVES MEM_NEEDED MEM_CFG PHP_FIXED
     for ((idx=0; idx<total; idx++)); do
         user="${U[$idx]}"; domain="${D[$idx]}"; before_status="${SB[$idx]}"; extra="${EX[$idx]}"
         i=$((i+1))
@@ -2437,7 +2512,7 @@ run_destination() {
             continue
         fi
         snap=$(snap_path after "$domain")
-        DISABLED_PLUGINS=""          # reset per account so counts never carry over
+        DISABLED_PLUGINS=""; DISABLED_MOVES=(); MEM_NEEDED=""; MEM_CFG=""; PHP_FIXED=""   # reset per account
         printf '[%3d/%3d] %-35s' "$i" "$total" "$domain"
 
         health "$domain" "$snap"
@@ -2448,49 +2523,58 @@ run_destination() {
         fi
         sa="$H_STATUS"
 
-        # Heal only fixable failures, only here, only with a known user.
+        # Heal only fixable failures, only here, only with a known user. Cascade in
+        # order: (1) step the PHP version down, (2) if still broken, diagnose the
+        # real fatal under the ORIGINAL PHP and either raise the memory limit (an
+        # "Allowed memory size exhausted" fatal) or disable the culprit plugin,
+        # (3) if still broken, step PHP down again now that plugins are off / memory
+        # is raised. If nothing works, put the server back exactly as found —
+        # original PHP, plugins re-enabled, memory edit reverted.
         if [ "$H_BROKEN" = "yes" ] && [ -n "$user" ]; then
             before_fix="$H_STATUS"
+            orig=$(get_current_php "$user")
+            [ -n "$orig" ] && printf ' (was PHP %s)' "$orig"
 
-            # 1) Plugin-fatal healing first: a plugin code fatal (the common
-            #    "critical error" WSOD) is not something a PHP switch can fix.
-            case "$H_STATUS" in
-                "Fail(php fatal)"|"Fail(wp error)"|"Fail(500)")
-                    heal_plugin_fatal "$user" "$domain"
-                    [ -n "$DISABLED_PLUGINS" ] && health "$domain" "$snap"
-                    ;;
-            esac
+            # 1) PHP version down.
+            php_step_down "$user" "$domain" "$snap"
 
-            if [ "$H_STATUS" = "OK" ] && [ -n "$DISABLED_PLUGINS" ]; then
-                sa="OK (disabled: $DISABLED_PLUGINS)"
-                printf ' -> %bfixed%b' "$GREEN" "$RESET"
-                log "DEST FIXED $domain by disabling: $DISABLED_PLUGINS"
-            else
-                # 2) Fall back to stepping the PHP version down.
-                orig=$(get_current_php "$user")
-                [ -n "$orig" ] && printf ' (was PHP %s)' "$orig"
-                for ver in $PHP_VERSIONS; do
-                    [ "$ver" = "$orig" ] && continue
-                    switch_php "$user" "$ver"; sleep "$SETTLE"
+            # 2) Diagnose the real fatal under the original PHP: memory or a plugin.
+            if [ "$H_BROKEN" = "yes" ]; then
+                [ -n "$orig" ] && { switch_php "$user" "$orig"; sleep "$SETTLE"; }
+                heal_plugin_fatal "$user" "$domain"
+                if [ -n "$MEM_NEEDED" ] && [ -n "$MEM_CFG" ] && raise_wp_memory "$MEM_CFG"; then
+                    printf ' -> %braised memory limit%b' "$GREEN" "$RESET"
                     health "$domain" "$snap"
-                    printf ' -> PHP %s -> %s' "$ver" "$H_STATUS"
-                    [ "$H_BROKEN" != "yes" ] && break
-                done
-                if [ "$H_STATUS" = "OK" ]; then
-                    sa="OK (fixed PHP $ver${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS})"
-                    printf ' -> %bfixed%b' "$GREEN" "$RESET"
-                    log "DEST FIXED $domain -> PHP $ver (was ${orig:-?})${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS}"
-                elif [ -n "$orig" ]; then
-                    switch_php "$user" "$orig"
-                    health "$domain" "$snap"      # snapshot the restored state
-                    sa="$before_fix (restored PHP $orig${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS})"
-                    printf ' -> %bnot fixed, restored PHP %s%b' "$RED" "$orig" "$RESET"
-                    log "DEST UNRESOLVED $domain — restored PHP $orig${DISABLED_PLUGINS:+, disabled: $DISABLED_PLUGINS}"
-                else
-                    sa="$before_fix${DISABLED_PLUGINS:+ (disabled: $DISABLED_PLUGINS)}"
-                    printf ' -> %bnot fixed (user/version unknown)%b' "$RED" "$RESET"
-                    log "DEST UNRESOLVED $domain — original version unknown"
+                elif [ -n "$DISABLED_PLUGINS" ]; then
+                    health "$domain" "$snap"
                 fi
+            fi
+
+            # 3) PHP down again, now with plugins off / memory raised.
+            [ "$H_BROKEN" = "yes" ] && php_step_down "$user" "$domain" "$snap"
+
+            if [ "$H_STATUS" = "OK" ]; then
+                local what=""
+                [ -n "$DISABLED_PLUGINS" ] && what="disabled: $DISABLED_PLUGINS"
+                [ -n "$MEM_NEEDED" ] && what="${what:+$what, }raised memory"
+                [ -n "$PHP_FIXED" ] && [ "$PHP_FIXED" != "$orig" ] && what="${what:+$what, }PHP $PHP_FIXED"
+                sa="OK${what:+ ($what)}"
+                printf ' -> %bfixed%b' "$GREEN" "$RESET"
+                log "DEST FIXED $domain (${what:-recovered})"
+            else
+                # Could not fix it — restore the server to exactly how we found it.
+                [ -n "$orig" ] && switch_php "$user" "$orig"
+                restore_disabled_plugins
+                [ -n "$MEM_CFG" ] && restore_wp_memory "$MEM_CFG"
+                health "$domain" "$snap"      # snapshot the restored state
+                local undo="restored"
+                [ -n "$orig" ] && undo="$undo PHP $orig"
+                [ -n "$DISABLED_PLUGINS" ] && undo="$undo, re-enabled plugins"
+                [ -n "$MEM_NEEDED" ] && undo="$undo, reverted memory"
+                sa="$before_fix ($undo)"
+                printf ' -> %bnot fixed, %s%b' "$RED" "$undo" "$RESET"
+                log "DEST UNRESOLVED $domain — $undo"
+                DISABLED_PLUGINS=""   # they were re-enabled, so they don't count as "disabled" below
             fi
         fi
         echo

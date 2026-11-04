@@ -313,7 +313,7 @@
             <button type="button" data-script="pro-plugin-manager">pro-plugin-manager.sh <span class="ver">1.9.0</span></button>
             <button type="button" data-script="plugin-hunter">plugin-hunter.sh <span class="ver">1.15.0</span></button>
             <button type="button" data-script="wp-core">wp-core.sh <span class="ver">1.9.1</span></button>
-            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.7.3</span></button>
+            <button type="button" data-script="magic-move">magic-move.sh <span class="ver">2.8.0</span></button>
             <button type="button" data-script="perm-patrol">perm-patrol.sh <span class="ver">1.3.1</span></button>
             <button type="button" data-script="fix-roundcube">fix-roundcube.sh <span class="ver">1.2.2</span></button>
             <button type="button" data-script="thing-to-link">thing-to-link.sh <span class="ver">1.4.0</span></button>
@@ -322,6 +322,23 @@
         <div class="entries" id="entries">
 
             <!-- ============ 2026-11-04 ============ -->
+            <article class="entry" data-script="magic-move" data-date="2026-11-04">
+                <div class="entry-head"><span class="script-tag" data-script="magic-move">magic-move.sh</span><span class="ver">2.8.0</span><time datetime="2026-11-04">2026-11-04</time>
+                </div>
+                <ul class="en">
+                    <li><strong>Destination healing is now a PHP → plugins/memory → PHP cascade.</strong> For a broken site it (1) steps the PHP version down, then (2) if still broken, back on the original PHP reads the real fatal and either <strong>raises the WordPress memory limit</strong> or <strong>disables the culprit plugin</strong>, then (3) if still broken steps the PHP version down again now that plugins are off / memory is raised.</li>
+                    <li><strong>Memory-exhaustion fatals are fixed directly.</strong> An "Allowed memory size of N bytes exhausted" error (the N varies — matched by the error's shape) is fixed by commenting any existing <code>WP_MEMORY_LIMIT</code>/<code>WP_MAX_MEMORY_LIMIT</code> in <code>wp-config.php</code> and adding <code>define('WP_MEMORY_LIMIT','4096M')</code> + <code>define('WP_MAX_MEMORY_LIMIT','4096M')</code> — instead of wrongly disabling the plugin the error happens to name.</li>
+                    <li><strong>Full restore on failure.</strong> If a site still can't be healed, it is put back exactly as found: PHP returns to its previous version (as before) <em>and</em> any plugins that were disabled are re-enabled, <em>and</em> the memory edit is reverted.</li>
+                    <li><strong>503s are retried.</strong> A transient <code>503</code> is retried twice more (3 attempts in all, with a short pause) before a page counts as broken.</li>
+                </ul>
+                <ul class="fa">
+                    <li><strong>ترمیمِ مقصد حالا یک آبشارِ PHP ← افزونه/حافظه ← PHP است.</strong> برای سایتِ خراب: (۱) نسخهٔ PHP را پله‌پله پایین می‌آورد، (۲) اگر هنوز خراب بود روی PHPِ اولیه خطای واقعی را می‌خواند و یا <strong>محدودیت حافظهٔ وردپرس را بالا می‌برد</strong> یا <strong>افزونهٔ مقصر را غیرفعال می‌کند</strong>، (۳) اگر باز خراب بود دوباره PHP را پله‌پله پایین می‌آورد حالا که افزونه‌ها خاموش / حافظه بالا رفته.</li>
+                    <li><strong>fatalِ کمبود حافظه مستقیم رفع می‌شود.</strong> خطای «Allowed memory size of N bytes exhausted» (که عددِ N متغیر است — بر اساس ساختارِ خطا تشخیص داده می‌شود) با کامنت‌کردن هر <code>WP_MEMORY_LIMIT</code>/<code>WP_MAX_MEMORY_LIMIT</code> موجود در <code>wp-config.php</code> و افزودنِ <code>define('WP_MEMORY_LIMIT','4096M')</code> + <code>define('WP_MAX_MEMORY_LIMIT','4096M')</code> رفع می‌شود — به‌جای اینکه اشتباهاً افزونه‌ای که خطا اسمش را آورده غیرفعال شود.</li>
+                    <li><strong>بازگردانیِ کامل در صورت شکست.</strong> اگر سایت باز هم ترمیم نشد، دقیقاً مثل اولش برمی‌گردد: PHP به نسخهٔ قبلی (مثل قبل) <em>و</em> افزونه‌های غیرفعال‌شده دوباره فعال می‌شوند <em>و</em> ویرایشِ حافظه هم بازگردانده می‌شود.</li>
+                    <li><strong>۵۰۳ها retry می‌شوند.</strong> خطای گذرای <code>503</code> دو بار دیگر (جمعاً ۳ بار، با مکثِ کوتاه) retry می‌شود پیش از اینکه صفحه خراب حساب شود.</li>
+                </ul>
+            </article>
+
             <article class="entry" data-script="plugin-hunter" data-date="2026-11-04">
                 <div class="entry-head"><span class="script-tag" data-script="plugin-hunter">plugin-hunter.sh</span><span class="ver">1.15.0</span><time datetime="2026-11-04">2026-11-04</time>
                 </div>
