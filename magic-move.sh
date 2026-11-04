@@ -14,9 +14,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 2.8.0
+#   Version   : 2.8.1
 # ════════════════════════════════════════════════════════════
-VERSION="2.8.0"
+VERSION="2.8.1"
 
 set -u
 
@@ -1600,6 +1600,10 @@ ask_yn() {    # $1 = prompt  $2 = default (y|n) -> 0 = yes
 # the moment the call runs.
 xfer_create_session() {   # key=value ... (non-secret session options)
     local -a a=("$@") sec=()
+    # Held in a variable, not inline in [[ =~ (…) ]]: an unquoted regex with
+    # parens there trips some bash 5.1 patchlevels' parser (it then reports a
+    # bogus syntax error at the next '(' in the function).
+    local badfmt_re='(issing|equired|parameter|argument|nput)' enc=""
     MM_PASS="$XFER_PASS" MM_KEYPASS="$XFER_KEYPASS" mm_perl -MJSON::PP -e '
         my %h; for (@ARGV) { my ($k, $v) = split /=/, $_, 2; $h{$k} = $v =~ /^\d+$/ ? $v + 0 : $v }
         $h{password}          = $ENV{MM_PASS}    if length($ENV{MM_PASS}    // "");
@@ -1608,11 +1612,11 @@ xfer_create_session() {   # key=value ... (non-secret session options)
         | "$WHMAPI" --input=json --output=json create_remote_root_transfer_session > "$WHM_JSON" 2>/dev/null
     if ! whm_ok; then
         if json_q "$WHM_JSON" 'print 1' >/dev/null && \
-           ! [[ "$WHM_REASON" =~ (issing|equired|parameter|argument|nput) ]]; then
+           ! [[ "$WHM_REASON" =~ $badfmt_re ]]; then
             return 1                # a real answer (bad host, ...), not an input-format problem
         fi
-        [ -n "$XFER_PASS" ]    && sec+=("password=$(printf '%s' "$XFER_PASS" | uri_enc)")
-        [ -n "$XFER_KEYPASS" ] && sec+=("sshkey_passphrase=$(printf '%s' "$XFER_KEYPASS" | uri_enc)")
+        if [ -n "$XFER_PASS" ]; then enc=$(printf '%s' "$XFER_PASS" | uri_enc); sec+=("password=$enc"); fi
+        if [ -n "$XFER_KEYPASS" ]; then enc=$(printf '%s' "$XFER_KEYPASS" | uri_enc); sec+=("sshkey_passphrase=$enc"); fi
         "$WHMAPI" --output=json create_remote_root_transfer_session "${a[@]}" ${sec[@]+"${sec[@]}"} > "$WHM_JSON" 2>/dev/null
         whm_ok || return 1
     fi
