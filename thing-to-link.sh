@@ -19,9 +19,9 @@
 #   Website   : https://bobclub.ir
 #   Scripts   : https://bobclub.ir/pool
 #   Telegram  : https://t.me/bob_club
-#   Version   : 1.4.0
+#   Version   : 1.4.1
 # ════════════════════════════════════════════════════════════
-VERSION="1.4.0"
+VERSION="1.4.1"
 set +H
 
 WEBROOT="/var/www/html"
@@ -36,6 +36,23 @@ ok(){    echo -e "\033[32m$*\033[0m"; }
 warn(){  echo -e "\033[1;33m$*\033[0m"; }
 err(){   echo -e "\033[31m✘ $*\033[0m" >&2; }
 link(){  echo -e "\033[1;36m$*\033[0m"; }
+
+# Download a URL to a file with a LIVE progress bar: wget's own bar when it
+# supports --show-progress, else plain wget (which prints progress anyway), else
+# curl's --progress-bar. $1 = url, $2 = dest.
+dl_file(){
+    if command -v wget >/dev/null 2>&1; then
+        if wget --help 2>&1 | grep -q -- --show-progress; then
+            wget -q --show-progress -O "$2" -- "$1"
+        else
+            wget -O "$2" -- "$1"
+        fi
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fL --progress-bar --connect-timeout 30 -o "$2" -- "$1"
+    else
+        return 1
+    fi
+}
 
 # ---------- Usage + argument parsing ----------
 usage() {
@@ -232,7 +249,7 @@ publish_webroot() {
     if [[ "$input" =~ ^https?:// ]]; then
         local filename; filename=$(basename "$input")
         rm -f "$WEBROOT/$filename"
-        if wget "$input" -O "$WEBROOT/$filename"; then
+        if dl_file "$input" "$WEBROOT/$filename"; then
             chown root:root "$WEBROOT/$filename"; chmod +r "$WEBROOT/$filename"
             ok "Download completed."
         else
@@ -394,11 +411,7 @@ stage_payload() {
     if [[ "$input" =~ ^https?:// ]]; then
         PAYLOAD_NAME=$(basename "$input"); [ -n "$PAYLOAD_NAME" ] || PAYLOAD_NAME="download"
         info "Fetching $input ..."
-        if command -v wget >/dev/null 2>&1; then
-            wget -q "$input" -O "$DOCROOT/$TOKEN/$PAYLOAD_NAME" || { err "Download failed."; return 1; }
-        else
-            curl -fsSL "$input" -o "$DOCROOT/$TOKEN/$PAYLOAD_NAME" || { err "Download failed."; return 1; }
-        fi
+        dl_file "$input" "$DOCROOT/$TOKEN/$PAYLOAD_NAME" || { err "Download failed."; return 1; }
 
     elif [ -f "$input" ]; then
         # Serve the file WHERE IT LIVES — a symlink into the token dir, never a
